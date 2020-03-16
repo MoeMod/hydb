@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
 project(hydb)
 
+add_compile_options(/utf-8)
+
 # MySQL-Connecter-C++
 if(WIN32)
     set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/include/jdbc")

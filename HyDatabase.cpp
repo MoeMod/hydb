@@ -2,6 +2,7 @@
 #include "MySqlConnectionPool.h"
 
 #include <random>
+#include <atomic>
 
 struct CHyDatabase::impl_t
 {

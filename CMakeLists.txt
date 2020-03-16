@@ -4,9 +4,16 @@ project(hydb)
 add_compile_options(/utf-8)
 
 # MySQL-Connecter-C++
+# Release°æ±¾£ºhttps://cdn.mysql.com//Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32.zip
+# Debug°æ±¾£ºhttps://dev.mysql.com/get/Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32-debug.zip
 if(WIN32)
-    set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/include/jdbc")
-    set(MYSQL_CONNECTOR_CPP_LIB_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/lib/vs14")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+        set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/include/jdbc")
+        set(MYSQL_CONNECTOR_CPP_LIB_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/lib/vs14/debug")
+    else()
+        set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/include/jdbc")
+        set(MYSQL_CONNECTOR_CPP_LIB_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/lib/vs14")
+    endif()
     set(MYSQL_CONNECTOR_CPP_LIB_NAME "mysqlcppconn.lib")
 elseif(APPLE)
     set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "/usr/local/include")

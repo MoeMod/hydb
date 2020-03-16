@@ -3,6 +3,7 @@
 
 #include <random>
 #include <atomic>
+#include <assert.h>
 
 struct CHyDatabase::impl_t
 {
@@ -44,6 +45,64 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataByQQID(int64_t fromQQ)
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS steamid, uid FROM idlink WHERE idsrc = 'steam') AS T3 "
 		"WHERE `qqid` = '" + std::to_string(fromQQ) + "';"
 	));
+}
+
+HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& steamid) noexcept(false)
+{
+	return UserAccountDataFromSqlResult(pimpl->pool.acquire()->Query(
+		"SELECT qqid, name, steamid, xscode, access, tag FROM qqlogin "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS qqid, uid FROM idlink WHERE idsrc = 'qq') AS T1 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS name, uid FROM idlink WHERE idsrc = 'name') AS T2 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS steamid, uid FROM idlink WHERE idsrc = 'steam') AS T3 "
+		"WHERE `steamid` = '" + steamid + "';"
+	));
+}
+
+bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
+{
+	auto conn = pimpl->pool.acquire();
+	auto res1 = conn->Query("SELECT `steamid` FROM csgoreg WHERE `gocode` = '" + std::to_string(gocode) + "';");
+	if (!res1->next())
+		return false; // 没有记录的注册id
+
+	const std::string steamid = res1->getString("steamid");
+	int uid = 0; 
+	while (1)
+	{
+		auto res2 = conn->Query("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
+		if (!res2->next())
+		{
+			//没有注册过，插入新的uid
+			conn->Update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
+			conn->Update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
+			continue;
+		}
+		//已经注册过，得到原先的uid 
+		uid = res2->getInt("uid"); 
+		break;
+	}
+	//用uid和steamid注册
+	int res3 = conn->Update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('steam', '" + steamid + "', '" + std::to_string(uid) + "');");
+	//删掉csgoreg里面的表项，不管成不成功都无所谓了
+	conn->Update("DELETE FROM csgoreg WHERE 'gocode' = '" + std::to_string(gocode) + "';");
+	return res3 == 1;
+}
+
+int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) noexcept(false)
+{
+	auto conn = pimpl->pool.acquire();
+	const std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
+	std::string gocode(8, '0');
+	assert(steamid_hash.size() > gocode.size());
+	int iMaxTries = 10;
+	do {
+		if (--iMaxTries == 0)
+			throw std::runtime_error("try failed");
+		conn->Update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
+		std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(std::random_device()()));
+	} while (conn->Update("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');") != 1);
+
+	return std::stoi(gocode);
 }
 
 static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std::shared_ptr<sql::ResultSet> &res)

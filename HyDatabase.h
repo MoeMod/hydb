@@ -79,10 +79,11 @@ private:
 public:
 	// 登录用
 	HyUserAccountData QueryUserAccountDataByQQID(int64_t qqid) noexcept(false); // 可能抛出InvalidUserAccountDataException
+	HyUserAccountData QueryUserAccountDataBySteamID(const std::string &steamid) noexcept(false); // 可能抛出InvalidUserAccountDataException
 
 	// CSGO注册用
-	HyUserAccountData QueryUserAccountDataByGoCode(int32_t gocode) noexcept(false); // 可能抛出InvalidUserAccountDataException
-	bool UpdateRegisteredQQIDByUID(int32_t uid, int64_t new_qqid);
+	bool BindQQToSteamID(int64_t new_qqid, int32_t gocode);
+	int32_t StartRegistrationWithSteamID(const std::string& steamid) noexcept(false);
 
 	// 查道具用
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false);

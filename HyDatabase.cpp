@@ -84,7 +84,7 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 	//用uid和steamid注册
 	int res3 = conn->Update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('steam', '" + steamid + "', '" + std::to_string(uid) + "');");
 	//删掉csgoreg里面的表项，不管成不成功都无所谓了
-	conn->Update("DELETE FROM csgoreg WHERE 'gocode' = '" + std::to_string(gocode) + "';");
+	conn->Update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
 	return res3 == 1;
 }
 
@@ -187,7 +187,7 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 		
 
 	// 计算签到名次
-	int rank = pimpl->m_iCachedSignRank.load();
+	int rank = 0; // pimpl->m_iCachedSignRank.load();
 	if(rank <= 10)
 	{
 		auto res = conn->Query("SELECT `qqid` FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());");

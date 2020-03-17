@@ -91,15 +91,17 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) noexcept(false)
 {
 	auto conn = pimpl->pool.acquire();
-	const std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
+	static std::random_device rd;
+	std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
 	std::string gocode(8, '0');
-	assert(steamid_hash.size() > gocode.size());
+	while(steamid_hash.size() < gocode.size());
+		steamid_hash.push_back(std::uniform_int_distribution<int>('0', '9')(rd));
 	int iMaxTries = 10;
 	do {
 		if (--iMaxTries == 0)
 			throw std::runtime_error("try failed");
 		conn->Update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
-		std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(std::random_device()()));
+		std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(rd()));
 	} while (conn->Update("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');") != 1);
 
 	return std::stoi(gocode);

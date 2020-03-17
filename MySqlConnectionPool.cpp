@@ -61,6 +61,7 @@ std::shared_ptr<MySqlConnectionUniqueAccessor> MySqlConnectionPool::acquire()
 			//continue;
 		}
 	}
+	ret->Update("use " + config.schema + ";");
 	return ret;
 }
 

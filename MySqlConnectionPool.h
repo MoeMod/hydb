@@ -47,6 +47,7 @@ public:
 public:
 	// ensures not nullptr
 	std::shared_ptr<MySqlConnectionUniqueAccessor> acquire();
+	void clear();
 
 private:
 	std::mutex m;

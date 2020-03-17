@@ -96,6 +96,9 @@ public:
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);
 
+	// 断开所有空闲连接
+	void Hibernate();
+
 private:
 	struct impl_t;
 	std::shared_ptr<impl_t> pimpl;

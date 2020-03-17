@@ -298,3 +298,8 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 
 	return { HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} };
 }
+
+void CHyDatabase::Hibernate()
+{
+	pimpl->pool.clear();
+}

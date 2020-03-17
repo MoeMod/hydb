@@ -64,6 +64,12 @@ std::shared_ptr<MySqlConnectionUniqueAccessor> MySqlConnectionPool::acquire()
 	return ret;
 }
 
+void MySqlConnectionPool::clear()
+{
+	std::lock_guard l(m); // 先加锁
+	v.clear();
+}
+
 MySqlConnectionUniqueAccessor::MySqlConnectionUniqueAccessor(std::shared_ptr<MySqlConnection> p) : connection(std::move(p))
 {
 

@@ -122,7 +122,7 @@ static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std
     return result;
 }
 
-std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid)
+std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false)
 {
 	return UserOwnItemInfoListFromSqlResult(pimpl->pool.acquire()->Query(
 		"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
@@ -132,10 +132,19 @@ std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t q
 	));
 }
 
-int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code)
+std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false)
 {
-	auto conn = pimpl->pool.acquire();
-	auto res = conn->Query(
+	return UserOwnItemInfoListFromSqlResult(pimpl->pool.acquire()->Query(
+			"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
+			"SELECT code, SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl GROUP BY code "
+			") AS itemlst;"
+	));
+}
+
+int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code) noexcept(false)
+{
+	auto res = pimpl->pool.acquire()->Query(
 			"SELECT SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
 			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl WHERE `code` = '" + code + "';"
 	);
@@ -146,10 +155,31 @@ int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code)
 	return 0;
 }
 
-bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount) noexcept(false) {
+int32_t CHyDatabase::GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false)
+{
+	auto res = pimpl->pool.acquire()->Query(
+			"SELECT SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl WHERE `code` = '" + code + "';"
+	);
+
+	if (res->next()){
+		return res->getInt("amount");
+	}
+	return 0;
+}
+
+bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount) noexcept(false)
+{
 	auto conn = pimpl->pool.acquire();
 	pimpl->pool.acquire()->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
 	return pimpl->pool.acquire()->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
+}
+
+bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount) noexcept(false)
+{
+	auto conn = pimpl->pool.acquire();
+	pimpl->pool.acquire()->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
+	return pimpl->pool.acquire()->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
 }
 
 std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::DoUserDailySign(const HyUserAccountData &user)

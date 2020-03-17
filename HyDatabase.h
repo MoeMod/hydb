@@ -87,8 +87,11 @@ public:
 
 	// 查道具用
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false);
+	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false);
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);
+	int32_t GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false);
 	bool GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount) noexcept(false);
+	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount) noexcept(false);
 
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);

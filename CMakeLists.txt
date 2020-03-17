@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.13)
 project(hydb)
 
-add_compile_options(/utf-8)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 # MySQL-Connecter-C++
-# Release°æ±¾£ºhttps://cdn.mysql.com//Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32.zip
-# Debug°æ±¾£ºhttps://dev.mysql.com/get/Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32-debug.zip
+# Releaseï¿½æ±¾ï¿½ï¿½https://cdn.mysql.com//Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32.zip
+# Debugï¿½æ±¾ï¿½ï¿½https://dev.mysql.com/get/Downloads/Connector-C++/mysql-connector-c++-8.0.19-win32-debug.zip
 if(WIN32)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
         set(MYSQL_CONNECTOR_CPP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/extern/mysql-connector-c++/include/jdbc")

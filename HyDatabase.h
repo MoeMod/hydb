@@ -81,6 +81,10 @@ public:
 	HyUserAccountData QueryUserAccountDataByQQID(int64_t qqid) noexcept(false); // 可能抛出InvalidUserAccountDataException
 	HyUserAccountData QueryUserAccountDataBySteamID(const std::string &steamid) noexcept(false); // 可能抛出InvalidUserAccountDataException
 
+	// CS1.6支持
+	bool UpdateXSCodeByQQID(int64_t qqid, int32_t xscode);
+	bool BindQQToCS16Name(int64_t qqid, int32_t xscode);
+
 	// CSGO注册用
 	bool BindQQToSteamID(int64_t new_qqid, int32_t gocode);
 	int32_t StartRegistrationWithSteamID(const std::string& steamid) noexcept(false);

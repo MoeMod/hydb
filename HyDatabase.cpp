@@ -58,6 +58,43 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& 
 	));
 }
 
+bool CHyDatabase::UpdateXSCodeByQQID(int64_t qqid, int32_t xscode)
+{
+	auto conn = pimpl->pool.acquire();
+	int res1 = conn->Update("UPDATE qqlogin SET `xscode` = '" + std::to_string(xscode) + "' WHERE `qqid` = '" + std::to_string(qqid) + "';");
+	return res1 == 1;
+}
+
+bool CHyDatabase::BindQQToCS16Name(int64_t new_qqid, int32_t xscode)
+{
+	auto conn = pimpl->pool.acquire();
+	auto res1 = conn->Query("SELECT `name` FROM cs16reg WHERE `xscode` = '" + std::to_string(xscode) + "';");
+	if (!res1->next())
+		return false;
+	
+	const std::string name = res1->getString("name");
+	int uid = 0;
+	while (1)
+	{
+		auto res2 = conn->Query("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
+		if (!res2->next())
+		{
+			//没有注册过，插入新的uid
+			conn->Update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
+			conn->Update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
+			continue;
+		}
+		//已经注册过，得到原先的uid 
+		uid = res2->getInt("uid");
+		break;
+	}
+	//用uid和steamid注册
+	int res3 = conn->Update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('name', '" + name + "', '" + std::to_string(uid) + "');");
+	//删掉cs16reg里面的表项，不管成不成功都无所谓了
+	conn->Update("DELETE FROM cs16reg WHERE `name` = '" + name + "';");
+	return res3 == 1;
+}
+
 bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 {
 	auto conn = pimpl->pool.acquire();
@@ -253,13 +290,13 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	std::vector<std::pair<HyItemInfo, int32_t>> awards;
 	{
 		auto res = conn->Query("SELECT "
-			"amx.itemaward.`code` AS icode, "
-			"amx.iteminfo.`name` AS iname, "
-			"amx.iteminfo.`desc` AS idesc, "
-			"amx.iteminfo.`quantifier` AS iquantifier, "
-			"amx.itemaward.`amount` AS iamount "
-			"FROM amx.itemaward, amx.iteminfo "
-			"WHERE amx.itemaward.`code` = amx.iteminfo.`code` AND '" + std::to_string(signcount) + "' BETWEEN `minfrags` AND `maxfrags`");
+			"itemaward.`code` AS icode, "
+			"iteminfo.`name` AS iname, "
+			"iteminfo.`desc` AS idesc, "
+			"iteminfo.`quantifier` AS iquantifier, "
+			"itemaward.`amount` AS iamount "
+			"FROM itemaward, iteminfo "
+			"WHERE itemaward.`code` = iteminfo.`code` AND '" + std::to_string(signcount) + "' BETWEEN `minfrags` AND `maxfrags`");
 
 		while (res->next())
 		{

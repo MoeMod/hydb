@@ -131,7 +131,7 @@ int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) no
 	static std::random_device rd;
 	std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
 	std::string gocode(8, '0');
-	while(steamid_hash.size() < gocode.size());
+	while(steamid_hash.size() < gocode.size())
 		steamid_hash.push_back(std::uniform_int_distribution<int>('0', '9')(rd));
 	int iMaxTries = 10;
 	do {
@@ -210,15 +210,28 @@ int32_t CHyDatabase::GetItemAmountBySteamID(const std::string &steamid, const st
 bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount) noexcept(false)
 {
 	auto conn = pimpl->pool.acquire();
-	pimpl->pool.acquire()->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
-	return pimpl->pool.acquire()->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
+	conn->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
+	return conn->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
 }
 
 bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount) noexcept(false)
 {
 	auto conn = pimpl->pool.acquire();
-	pimpl->pool.acquire()->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
-	return pimpl->pool.acquire()->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
+	conn->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
+	return conn->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
+}
+
+bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount) noexcept(false)
+{
+	auto conn = pimpl->pool.acquire();
+	if(conn->Update("UPDATE itemown SET `amount` = `amount` - '" + std::to_string(sub_amount) + "' WHERE `idsrc` = 'steam' AND `auth` = '" + steamid + "' AND `code` = '" + code + "' AND `amount` > '" + std::to_string(sub_amount) + "'; ") == 1)
+		return true;
+
+	int iHasAmount = GetItemAmountBySteamID(steamid, code);
+	if(iHasAmount < sub_amount)
+		return false;
+	conn->Update("DELETE FROM itemown WHERE (itemown.idsrc, itemown.auth) IN (SELECT idl0.idsrc AS idsrc, idl0.auth AS auth FROM idlink AS idl0 JOIN idlink AS idl1 ON idl0.uid = idl1.uid WHERE idl1.idsrc = 'steam' AND idl1.auth = '" + steamid + "') AND `code` = '" + code + "';");
+	return GiveItemBySteamID(steamid, code, static_cast<unsigned>(iHasAmount));
 }
 
 std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::DoUserDailySign(const HyUserAccountData &user)

@@ -38,6 +38,9 @@ add_library(hydb STATIC
         HyDatabase.h
         MySqlConnectionPool.cpp
         MySqlConnectionPool.h
+        GlobalContext.cpp
+        GlobalContext.h
         )
 target_include_directories(hydb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hydb PUBLIC mysqlcppconn xorstr)
+target_link_libraries(hydb PRIVATE Boost::boost)

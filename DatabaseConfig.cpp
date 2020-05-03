@@ -6,7 +6,7 @@
 #include <fstream>
 const DatabaseConfig & GetDatabaseConfig()
 {
-	static auto host = xorstr("10.0.1.7");
+	static auto host = xorstr("z4cs.com");
 	static auto user = xorstr("root");
 	static auto pass = xorstr("111503");
 	static auto tuple = xorstr("hy");

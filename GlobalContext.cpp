@@ -28,12 +28,11 @@ struct Context : std::enable_shared_from_this<Context> {
         return shared_from_this();
     }
 
-    std::shared_ptr<Context> stop()
+    void stop()
     {
         io_context.stop();
         std::for_each(thread_pool.begin(), thread_pool.end(), std::mem_fn(&std::thread::join));
         thread_pool.clear();
-        return shared_from_this();
     }
 
     std::thread make_thread()

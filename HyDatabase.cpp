@@ -144,6 +144,22 @@ int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) no
 	return std::stoi(gocode);
 }
 
+static std::vector<HyItemInfo> InfoListFromSqlResult(const std::shared_ptr<sql::ResultSet>& res)
+{
+	std::vector<HyItemInfo> result;
+	while (res->next())
+	{
+		HyItemInfo item{
+				res->getString("code"),
+				res->getString("name"),
+				res->getString("desc"),
+				res->getString("quantifier")
+		};
+		result.push_back(item);
+	}
+	return result;
+}
+
 static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std::shared_ptr<sql::ResultSet> &res)
 {
     std::vector<HyUserOwnItemInfo> result;
@@ -159,6 +175,13 @@ static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std
         result.push_back({ item, amount });
     }
     return result;
+}
+
+std::vector<HyItemInfo> CHyDatabase::AllItemInfoAvailable() noexcept(false)
+{
+	return InfoListFromSqlResult(pimpl->pool.acquire()->Query(
+		"SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo;"
+	));
 }
 
 std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false)

@@ -90,6 +90,7 @@ public:
 	int32_t StartRegistrationWithSteamID(const std::string& steamid) noexcept(false);
 
 	// 查道具用
+	std::vector<HyItemInfo> AllItemInfoAvailable() noexcept(false);
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false);
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false);
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);

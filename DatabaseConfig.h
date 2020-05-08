@@ -4,7 +4,8 @@
 
 struct DatabaseConfig
 {
-	std::string url;
+	std::string host;
+	std::string port;
 	std::string user;
 	std::string pass;
 	std::string schema;

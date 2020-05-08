@@ -3,38 +3,9 @@
 #include "cppconn/statement.h"
 #include "GlobalContext.h"
 #include <boost/asio.hpp>
+#include "MySqlConnection.h"
 
 #include <mutex>
-
-class MySqlConnection : std::enable_shared_from_this<MySqlConnection>
-{
-public:
-	MySqlConnection(const DatabaseConfig &config) :
-		driver(get_driver_instance()),
-		config(config)
-	{
-		sql::ConnectOptionsMap connection_properties;
-		connection_properties["hostName"] = config.url;
-		connection_properties["userName"] = config.user;
-		connection_properties["password"] = config.pass;
-		connection_properties["OPT_RECONNECT"] = true;
-		connection_properties["OPT_CHARSET_NAME"] = "utf8";
-
-		con.reset(driver->connect(connection_properties));
-		con->setSchema(config.schema);
-		stmt.reset(con->createStatement());
-	}
-
-public:
-	std::mutex connectMutex;
-	DatabaseConfig config;
-	sql::Driver *driver;
-	std::unique_ptr<sql::Connection> con;
-	std::unique_ptr<sql::Statement> stmt;
-
-public:
-	std::weak_ptr<MySqlConnectionUniqueAccessor> accessor;
-};
 
 void StartHeartBeat(std::weak_ptr<MySqlConnection> wconn)
 {
@@ -45,8 +16,9 @@ void StartHeartBeat(std::weak_ptr<MySqlConnection> wconn)
 	st->async_wait([ioc, st, wconn](const boost::system::error_code& ec) {
 		if (auto conn = wconn.lock())
 		{
-			conn->stmt->executeQuery("SELECT 1=1;");
-			StartHeartBeat(conn);
+			conn->connection.async_query("SELECT 1=1",[conn](boost::system::error_code, boost::mysql::tcp_resultset){
+				StartHeartBeat(conn);
+			});
 		}
 	});
 }
@@ -58,23 +30,28 @@ MySqlConnectionPool::MySqlConnectionPool(const DatabaseConfig & c) : config(c)
 
 MySqlConnectionPool::~MySqlConnectionPool() = default;
 
-std::shared_ptr<MySqlConnectionUniqueAccessor> MySqlConnectionPool::acquire()
+std::shared_ptr<boost::mysql::tcp_connection> MySqlConnectionPool::acquire()
 {
 	std::lock_guard l(m); // 先加锁
 
-	std::shared_ptr<MySqlConnectionUniqueAccessor> ret = nullptr;
+	std::shared_ptr<boost::mysql::tcp_connection> ret = nullptr;
 	while (ret == nullptr)
 	{
 		if (auto iter = std::find_if(v.cbegin(), v.cend(), [](const std::shared_ptr<MySqlConnection> &p) { return p->accessor.lock() == nullptr; }); iter != v.cend())
 		{
 			// 有可用连接，设置后返回。
-			ret = std::make_shared<MySqlConnectionUniqueAccessor>(*iter);
+			auto sp = std::make_shared<std::shared_ptr<MySqlConnection>>(*iter);
 			(*iter)->accessor = ret;
+
+			ret = std::shared_ptr<boost::mysql::tcp_connection>(sp, &(*sp)->connection);
 			//break;
 		}
 		else
 		{
-			auto conn = std::make_shared<MySqlConnection>(config);
+		    auto ioc = GlobalContextSingleton();
+			auto conn = std::make_shared<MySqlConnection>(config, ioc);
+			conn->start();
+			conn->wait_for_ready();
 			StartHeartBeat(conn);
 			v.push_back(conn);
 			//continue;
@@ -89,43 +66,14 @@ void MySqlConnectionPool::clear()
 	v.clear();
 }
 
-MySqlConnectionUniqueAccessor::MySqlConnectionUniqueAccessor(std::shared_ptr<MySqlConnection> p) : connection(std::move(p))
+std::vector<boost::mysql::owning_row> MySqlConnectionPool::query_fetch(std::string_view sql)
 {
-
+    auto conn = acquire();
+    return conn->query(sql).fetch_all();
 }
 
-MySqlConnectionUniqueAccessor::~MySqlConnectionUniqueAccessor() = default;
-
-std::shared_ptr<sql::ResultSet> MySqlConnectionUniqueAccessor::Query(const std::string & sql)
+std::uint64_t MySqlConnectionPool::query_update(std::string_view sql)
 {
-	for(int iRetryTimes = 0; iRetryTimes < 3; ++iRetryTimes)
-	{
-		try {
-			return std::shared_ptr<sql::ResultSet>(connection->stmt->executeQuery(sql));
-		} catch(const sql::SQLException &e) {
-			if(e.getErrorCode() == 2013) // Lost connection to MySQL server during query
-				continue;
-			if(e.getErrorCode() == 10060) // Can't connect to MySQL server
-				break;
-			throw;
-		}
-	}
-	throw std::runtime_error("MySQL 服务器挂了");
-}
-
-int MySqlConnectionUniqueAccessor::Update(const std::string & sql)
-{
-	for(int iRetryTimes = 0; iRetryTimes < 3; ++iRetryTimes)
-	{
-		try {
-			return connection->stmt->executeUpdate(sql);
-		} catch(const sql::SQLException &e) {
-			if(e.getErrorCode() == 2013) // Lost connection to MySQL server during query
-				continue; // retry
-            if (e.getErrorCode() == 10060) // Can't connect to MySQL server
-                break;
-			throw;
-		}
-	}
-	throw std::runtime_error("MySQL 服务器挂了");
+    auto conn = acquire();
+	return conn->query(sql).affected_rows();
 }

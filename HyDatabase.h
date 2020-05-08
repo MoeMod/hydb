@@ -5,6 +5,7 @@
 #include <chrono>
 #include <optional>
 #include <vector>
+#include <future>
 #include <stdexcept>
 
 struct HyUserAccountData
@@ -95,8 +96,17 @@ public:
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false);
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);
 	int32_t GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false);
-	bool GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount) noexcept(false);
-	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount) noexcept(false);
+
+	// 给玩家qqid赠送道具
+	bool GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount);
+	void async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
+	std::future<bool> async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount);
+
+	// 给玩家steamid赠送道具
+	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount);
+	void async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
+	std::future<bool> async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount);
+
 	bool ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount) noexcept(false);
 
 	// 签到用（确保QQID存在）

@@ -3,6 +3,9 @@
 
 #include <random>
 #include <atomic>
+#include <string>
+#include <future>
+#include <string_view>
 #include <assert.h>
 
 struct CHyDatabase::impl_t
@@ -22,23 +25,52 @@ CHyDatabase::CHyDatabase() : pimpl(std::make_shared<impl_t>()) {}
 
 CHyDatabase::~CHyDatabase() = default;
 
-static HyUserAccountData UserAccountDataFromSqlResult(const std::shared_ptr<sql::ResultSet> &res)
+
+template<class IntegeralType>
+struct IntegerVisitor {
+	static_assert(std::is_integral<IntegeralType>::value);
+
+	template<class T> auto operator()(T arg) -> typename std::enable_if<std::is_integral<T>::value, IntegeralType>::type
+	{
+		return arg;
+	}
+	IntegeralType operator()(std::string_view arg)
+	{
+		std::stringstream ss;
+		ss << arg;
+		IntegeralType ret = {};
+		ss >> ret;
+		return ret;
+	}
+	IntegeralType operator()(std::nullptr_t)
+	{
+		return 0;
+	}
+	IntegeralType operator()(...)
+	{
+		throw std::bad_variant_access();
+	}
+};
+
+// qqid, name, steamid, xscode, access, tag
+static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::mysql::owning_row> &res)
 {
-	if (!res->next())
+	if (res.empty())
 		throw InvalidUserAccountDataException();
+	const auto &line = res[0].values();
 	return HyUserAccountData{
-			res->getInt64("qqid"),
-			res->getString("name"),
-			res->getString("steamid"),
-			res->getInt("xscode"),
-			res->getString("access"),
-			res->getString("tag")
+		std::visit(IntegerVisitor<int64_t>(), line[0]),
+		std::string(std::get<std::string_view>(line[1])),
+		std::string(std::get<std::string_view>(line[2])),
+		std::visit(IntegerVisitor<int32_t>(), line[2]),
+		std::string(std::get<std::string_view>(line[4])),
+		std::string(std::get<std::string_view>(line[5]))
 	};
 }
 
 HyUserAccountData CHyDatabase::QueryUserAccountDataByQQID(int64_t fromQQ)
 {
-	return UserAccountDataFromSqlResult(pimpl->pool.acquire()->Query(
+	return UserAccountDataFromSqlResult(pimpl->pool.query_fetch(
 		"SELECT qqid, name, steamid, xscode, access, tag FROM qqlogin "
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS qqid, uid FROM idlink WHERE idsrc = 'qq') AS T1 "
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS name, uid FROM idlink WHERE idsrc = 'name') AS T2 "
@@ -49,7 +81,7 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataByQQID(int64_t fromQQ)
 
 HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& steamid) noexcept(false)
 {
-	return UserAccountDataFromSqlResult(pimpl->pool.acquire()->Query(
+	return UserAccountDataFromSqlResult(pimpl->pool.query_fetch(
 		"SELECT qqid, name, steamid, xscode, access, tag FROM qqlogin "
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS qqid, uid FROM idlink WHERE idsrc = 'qq') AS T1 "
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS name, uid FROM idlink WHERE idsrc = 'name') AS T2 "
@@ -60,74 +92,70 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& 
 
 bool CHyDatabase::UpdateXSCodeByQQID(int64_t qqid, int32_t xscode)
 {
-	auto conn = pimpl->pool.acquire();
-	int res1 = conn->Update("UPDATE qqlogin SET `xscode` = '" + std::to_string(xscode) + "' WHERE `qqid` = '" + std::to_string(qqid) + "';");
+	auto res1 = pimpl->pool.query_update("UPDATE qqlogin SET `xscode` = '" + std::to_string(xscode) + "' WHERE `qqid` = '" + std::to_string(qqid) + "';");
 	return res1 == 1;
 }
 
 bool CHyDatabase::BindQQToCS16Name(int64_t new_qqid, int32_t xscode)
 {
-	auto conn = pimpl->pool.acquire();
-	auto res1 = conn->Query("SELECT `name` FROM cs16reg WHERE `xscode` = '" + std::to_string(xscode) + "';");
-	if (!res1->next())
+	auto res1 = pimpl->pool.query_fetch("SELECT `name` FROM cs16reg WHERE `xscode` = '" + std::to_string(xscode) + "';");
+	if (res1.empty())
 		return false;
 	
-	const std::string name = res1->getString("name");
+	const std::string name = std::string(std::get<std::string_view>(res1[0].values()[0]));
 	int uid = 0;
 	while (1)
 	{
-		auto res2 = conn->Query("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
-		if (!res2->next())
+		auto res2 = pimpl->pool.query_fetch("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
+		if (res2.empty())
 		{
 			//没有注册过，插入新的uid
-			conn->Update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
-			conn->Update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
+            pimpl->pool.query_update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
+            pimpl->pool.query_update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = res2->getInt("uid");
+		uid = std::get<std::int32_t>(res2[0].values()[0]);
 		break;
 	}
 	//用uid和steamid注册
-	int res3 = conn->Update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('name', '" + name + "', '" + std::to_string(uid) + "');");
+	auto res3 = pimpl->pool.query_update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('name', '" + name + "', '" + std::to_string(uid) + "');");
 	//删掉cs16reg里面的表项，不管成不成功都无所谓了
-	conn->Update("DELETE FROM cs16reg WHERE `name` = '" + name + "';");
+    pimpl->pool.query_update("DELETE FROM cs16reg WHERE `name` = '" + name + "';");
 	return res3 == 1;
 }
 
 bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 {
-	auto conn = pimpl->pool.acquire();
-	auto res1 = conn->Query("SELECT `steamid` FROM csgoreg WHERE `gocode` = '" + std::to_string(gocode) + "';");
-	if (!res1->next())
+	auto res1 = pimpl->pool.query_fetch("SELECT `steamid` FROM csgoreg WHERE `gocode` = '" + std::to_string(gocode) + "';");
+	if (res1.empty())
 		return false; // 没有记录的注册id
 
-	const std::string steamid = res1->getString("steamid");
+	const std::string steamid = std::string(std::get<std::string_view>(res1[0].values()[0]));
 	int uid = 0; 
 	while (1)
 	{
-		auto res2 = conn->Query("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
-		if (!res2->next())
+		auto res2 = pimpl->pool.query_fetch("SELECT `uid` FROM idlink WHERE `idsrc` = 'qq' AND `auth` = '" + std::to_string(new_qqid) + "';");
+		if (res2.empty())
 		{
 			//没有注册过，插入新的uid
-			conn->Update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
-			conn->Update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
+            pimpl->pool.query_update("INSERT IGNORE INTO idlink(idsrc, auth) VALUES('qq', '" + std::to_string(new_qqid) + "');");
+            pimpl->pool.query_update("INSERT IGNORE INTO qqlogin(qqid) VALUES('" + std::to_string(new_qqid) + "');");
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = res2->getInt("uid"); 
+		uid = std::get<std::int32_t>(res2[0].values()[0]);
 		break;
 	}
 	//用uid和steamid注册
-	int res3 = conn->Update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('steam', '" + steamid + "', '" + std::to_string(uid) + "');");
+	auto res3 = pimpl->pool.query_update("INSERT IGNORE INTO idlink(idsrc, auth, uid) VALUES('steam', '" + steamid + "', '" + std::to_string(uid) + "');");
 	//删掉csgoreg里面的表项，不管成不成功都无所谓了
-	conn->Update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
+    pimpl->pool.query_update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
 	return res3 == 1;
 }
 
 int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) noexcept(false)
 {
-	auto conn = pimpl->pool.acquire();
 	static std::random_device rd;
 	std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
 	std::string gocode(8, '0');
@@ -137,58 +165,57 @@ int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) no
 	do {
 		if (--iMaxTries == 0)
 			throw std::runtime_error("try failed");
-		conn->Update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
+        pimpl->pool.query_update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
 		std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(rd()));
-	} while (conn->Update("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');") != 1);
+	} while (pimpl->pool.query_update("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');") != 1);
 
 	return std::stoi(gocode);
 }
 
-static std::vector<HyItemInfo> InfoListFromSqlResult(const std::shared_ptr<sql::ResultSet>& res)
+// `code`, `name`, `desc`, `quantifier`
+static HyItemInfo HyItemInfoFromSqlLine(const std::vector<boost::mysql::value> &line)
+{
+	return HyItemInfo{
+			std::string(std::get<std::string_view>(line[0])),
+			std::string(std::get<std::string_view>(line[1])),
+			std::string(std::get<std::string_view>(line[2])),
+			std::string(std::get<std::string_view>(line[3]))
+	};
+}
+
+static std::vector<HyItemInfo> InfoListFromSqlResult(const std::vector<boost::mysql::owning_row> & res)
 {
 	std::vector<HyItemInfo> result;
-	while (res->next())
+	for(auto &l : res)
 	{
-		HyItemInfo item{
-				res->getString("code"),
-				res->getString("name"),
-				res->getString("desc"),
-				res->getString("quantifier")
-		};
-		result.push_back(item);
+		result.push_back(HyItemInfoFromSqlLine(l.values()));
 	}
 	return result;
 }
 
-static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std::shared_ptr<sql::ResultSet> &res)
+// `code`, `name`, `desc`, `quantifier`, `amount`
+static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std::vector<boost::mysql::owning_row> &res)
 {
     std::vector<HyUserOwnItemInfo> result;
-    while (res->next())
-    {
-        HyItemInfo item{
-                res->getString("code"),
-                res->getString("name"),
-                res->getString("desc"),
-                res->getString("quantifier")
-        };
-        auto amount = res->getInt("amount");
-        result.push_back({ item, amount });
-    }
+	for(auto &l : res)
+	{
+		result.push_back({ HyItemInfoFromSqlLine(l.values()), std::visit(IntegerVisitor<int>(), l.values()[4]) });
+	}
     return result;
 }
 
 std::vector<HyItemInfo> CHyDatabase::AllItemInfoAvailable() noexcept(false)
 {
-	return InfoListFromSqlResult(pimpl->pool.acquire()->Query(
+	return InfoListFromSqlResult(pimpl->pool.query_fetch(
 		"SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo;"
 	));
 }
 
 std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false)
 {
-	return UserOwnItemInfoListFromSqlResult(pimpl->pool.acquire()->Query(
+	return UserOwnItemInfoListFromSqlResult(pimpl->pool.query_fetch(
 		"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
-			"SELECT code, SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"SELECT code, CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
 			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl GROUP BY code "
 		") AS itemlst;"
 	));
@@ -196,9 +223,9 @@ std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t q
 
 std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false)
 {
-	return UserOwnItemInfoListFromSqlResult(pimpl->pool.acquire()->Query(
+	return UserOwnItemInfoListFromSqlResult(pimpl->pool.query_fetch(
 			"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
-			"SELECT code, SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"SELECT code, CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
 			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl GROUP BY code "
 			") AS itemlst;"
 	));
@@ -206,54 +233,91 @@ std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoBySteamID(const 
 
 int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code) noexcept(false)
 {
-	auto res = pimpl->pool.acquire()->Query(
-			"SELECT SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+	auto res = pimpl->pool.query_fetch(
+			"SELECT CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
 			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl WHERE `code` = '" + code + "';"
 	);
 
-	if (res->next()){
-		return res->getInt("amount");
+	if (!res.empty()){
+		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]);
 	}
 	return 0;
 }
 
 int32_t CHyDatabase::GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false)
 {
-	auto res = pimpl->pool.acquire()->Query(
-			"SELECT SUM(amount) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+	auto res = pimpl->pool.query_fetch(
+			"SELECT CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
 			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl WHERE `code` = '" + code + "';"
 	);
 
-	if (res->next()){
-		return res->getInt("amount");
+	if (!res.empty()){
+		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]);
 	}
 	return 0;
 }
 
-bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount) noexcept(false)
+bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount)
 {
-	auto conn = pimpl->pool.acquire();
-	conn->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
-	return conn->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
+	pimpl->pool.query_update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0');");
+	return pimpl->pool.query_update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
 }
 
-bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount) noexcept(false)
+std::future<bool> CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount)
+{
+	auto pro = std::make_shared<std::promise<bool>>();
+	async_GiveItemByQQID(qqid, code, add_amount, [pro](bool val){ pro->set_value(val); });
+	return pro->get_future();
+}
+
+void CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount, std::function<void(bool success)> fn)
 {
 	auto conn = pimpl->pool.acquire();
-	conn->Update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
-	return conn->Update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
+	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
+	auto sql2 = std::make_shared<std::string>("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'");
+
+	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+			fn(!ec && resultset.affected_rows() > 0);
+		});
+	});
+}
+
+bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount)
+{
+    pimpl->pool.query_update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
+	return pimpl->pool.query_update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
+}
+
+std::future<bool> CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount)
+{
+	auto pro = std::make_shared<std::promise<bool>>();
+	async_GiveItemBySteamID(steamid, code, add_amount, [pro](bool val){ pro->set_value(val); });
+	return pro->get_future();
+}
+
+void CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std::string &code, unsigned add_amount, std::function<void(bool success)> fn)
+{
+	auto conn = pimpl->pool.acquire();
+	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
+	auto sql2 = std::make_shared<std::string>("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'");
+
+	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+			fn(!ec && resultset.affected_rows() > 0);
+		});
+	});
 }
 
 bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount) noexcept(false)
 {
-	auto conn = pimpl->pool.acquire();
-	if(conn->Update("UPDATE itemown SET `amount` = `amount` - '" + std::to_string(sub_amount) + "' WHERE `idsrc` = 'steam' AND `auth` = '" + steamid + "' AND `code` = '" + code + "' AND `amount` > '" + std::to_string(sub_amount) + "'; ") == 1)
+	if(pimpl->pool.query_update("UPDATE itemown SET `amount` = `amount` - '" + std::to_string(sub_amount) + "' WHERE `idsrc` = 'steam' AND `auth` = '" + steamid + "' AND `code` = '" + code + "' AND `amount` > '" + std::to_string(sub_amount) + "'; ") == 1)
 		return true;
 
 	int iHasAmount = GetItemAmountBySteamID(steamid, code);
 	if(iHasAmount < sub_amount)
 		return false;
-	conn->Update("DELETE FROM itemown WHERE (itemown.idsrc, itemown.auth) IN (SELECT idl0.idsrc AS idsrc, idl0.auth AS auth FROM idlink AS idl0 JOIN idlink AS idl1 ON idl0.uid = idl1.uid WHERE idl1.idsrc = 'steam' AND idl1.auth = '" + steamid + "') AND `code` = '" + code + "';");
+    pimpl->pool.query_update("DELETE FROM itemown WHERE (itemown.idsrc, itemown.auth) IN (SELECT idl0.idsrc AS idsrc, idl0.auth AS auth FROM idlink AS idl0 JOIN idlink AS idl1 ON idl0.uid = idl1.uid WHERE idl1.idsrc = 'steam' AND idl1.auth = '" + steamid + "') AND `code` = '" + code + "';");
 	return GiveItemBySteamID(steamid, code, static_cast<unsigned>(iHasAmount));
 }
 
@@ -266,27 +330,26 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	int signcount = 0;
 
 	// 判断是否重复签到
-	auto conn = pimpl->pool.acquire();
 	{
-		auto res = conn->Query("SELECT TO_DAYS(NOW()) - TO_DAYS(`signdate`) AS signdelta, `signcount` FROM qqevent WHERE `qqid` ='" + std::to_string(user.qqid) + "';");
-		if (res->next())
+		auto res = pimpl->pool.query_fetch("SELECT TO_DAYS(NOW()) - TO_DAYS(`signdate`) AS signdelta, `signcount` FROM qqevent WHERE `qqid` ='" + std::to_string(user.qqid) + "';");
+		if (!res.empty())
 		{
-			auto signdelta = res->getInt(1);
+			int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0]);
 			
-			if (!res->isNull(1) && signdelta == 0 )
+			if (signdelta == 0 )
 			{
 				// 已经签到过
 				return { HyUserSignResultType::failure_already_signed , std::nullopt };
 			}
 
 			if (signdelta == 1)
-				signcount = res->getInt(2);
+				signcount = std::get<std::int32_t>(res[0].values()[1]);
 
-			conn->Update("UPDATE qqevent SET `signdate`=NOW(), `signcount`='" + std::to_string(signcount + 1) + "' WHERE `qqid`='" + std::to_string(user.qqid) + "';");
+            pimpl->pool.query_update("UPDATE qqevent SET `signdate`=NOW(), `signcount`='" + std::to_string(signcount + 1) + "' WHERE `qqid`='" + std::to_string(user.qqid) + "';");
 		}
 		else
 		{
-			conn->Update("INSERT INTO qqevent(qqid) VALUES('" + std::to_string(user.qqid) + "');");
+            pimpl->pool.query_update("INSERT INTO qqevent(qqid) VALUES('" + std::to_string(user.qqid) + "');");
 		}
 	}
 		
@@ -295,8 +358,8 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	int rank = 0; // pimpl->m_iCachedSignRank.load();
 	if(rank <= 10)
 	{
-		auto res = conn->Query("SELECT `qqid` FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());");
-		rank = res->rowsCount();
+		auto res = pimpl->pool.query_fetch("SELECT `qqid` FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());");
+		rank = res.size();
 		pimpl->m_iCachedSignRank.store(rank);
 	}
 	else
@@ -325,30 +388,26 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	// 填充签到奖励表
 	std::vector<std::pair<HyItemInfo, int32_t>> awards;
 	{
-		auto res = conn->Query("SELECT "
+		auto res = pimpl->pool.query_fetch("SELECT "
 			"itemaward.`code` AS icode, "
 			"iteminfo.`name` AS iname, "
 			"iteminfo.`desc` AS idesc, "
 			"iteminfo.`quantifier` AS iquantifier, "
-			"itemaward.`amount` AS iamount "
+			"CAST(itemaward.`amount` AS SIGNED INTEGER) AS iamount "
 			"FROM itemaward, iteminfo "
 			"WHERE itemaward.`code` = iteminfo.`code` AND '" + std::to_string(signcount) + "' BETWEEN `minfrags` AND `maxfrags`");
 
-		while (res->next())
+		for(auto & l : res)
 		{
-			HyItemInfo item{
-				res->getString("icode"),
-				res->getString("iname"),
-				res->getString("idesc"),
-				res->getString("iquantifier"),
-			};
-			auto add_amount = res->getInt("iamount");
+			HyItemInfo item = HyItemInfoFromSqlLine(l.values());
+
+			int add_amount = std::visit(IntegerVisitor<int>(), l.values()[4]);
 
 			awards.emplace_back(std::move(item), add_amount);
 		}
 	}
 	
-	auto f = [&awards, &user, &conn, this]() -> HyUserSignGetItemInfo {
+	auto f = [&awards, &user, this]() -> HyUserSignGetItemInfo {
 		// 随机选择签到奖励
 		std::random_device rd;
 		std::uniform_int_distribution<std::size_t> rg(0, awards.size() - 1);
@@ -366,10 +425,12 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	std::generate(vecItems.begin(), vecItems.end(), f);
 
 	// 设置新奖励
-	auto f2 = [conn = pimpl->pool.acquire(), &user, this](const HyUserSignGetItemInfo &info) {
-		GiveItemByQQID(user.qqid, info.item.code, info.add_amount);
+	auto f2 = [&user, this](const HyUserSignGetItemInfo &info) {
+		return async_GiveItemByQQID(user.qqid, info.item.code, info.add_amount);
 	};
-	std::for_each(vecItems.begin(), vecItems.end(), f2);
+	std::vector<std::future<bool>> give_futures(vecItems.size());
+	std::transform(vecItems.begin(), vecItems.end(), give_futures.begin(), f2);
+	bool success_give = std::transform_reduce(give_futures.begin(), give_futures.end(), true, std::logical_and<bool>(), std::mem_fn(&std::future<bool>::get));
 
 	return { HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} };
 }

@@ -24,6 +24,8 @@ public:
     std::vector<boost::mysql::owning_row> query_fetch(std::string_view sql);
     std::uint64_t query_update(std::string_view sql);
 
+	void StartHeartBeat(std::weak_ptr<MySqlConnection>);
+
 private:
 	std::mutex m;
 	std::vector<std::shared_ptr<MySqlConnection>> v;

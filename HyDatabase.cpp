@@ -215,13 +215,12 @@ std::vector<HyItemInfo> CHyDatabase::AllItemInfoAvailable() noexcept(false)
 void CHyDatabase::async_AllItemInfoAvailable(std::function<void(std::error_code, std::vector<HyItemInfo>)> fn)
 {
 	auto conn = pimpl->pool.acquire();
-	conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo;", [fn, conn](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
-		if(ec)
-			return fn(ec, {});
-		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res){
-			if(ec)
-				return fn(ec, {});
-			return fn(ec, InfoListFromSqlResult(std::move(res)));
+	conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo;", [fn, conn](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset) {
+		if (ec)
+			return fn(ec, {}); 
+		auto resultset_keep = std::make_shared<boost::mysql::tcp_resultset>(std::move(resultset));
+		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res){
+			return fn(ec, InfoListFromSqlResult(res));
 		});
 	});
 }
@@ -245,12 +244,11 @@ void CHyDatabase::async_QueryUserOwnItemInfoByQQID(int64_t qqid, std::function<v
 			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl GROUP BY code "
 			") AS itemlst;"
 		);
-	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
-		if(ec)
-			return fn(ec, {});
-		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
-			if(ec)
-				return fn(ec, {});
+	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset) {
+		if (ec)
+			return fn(ec, {}); 
+		auto resultset_keep = std::make_shared<boost::mysql::tcp_resultset>(std::move(resultset));
+		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
 			return fn(ec, UserOwnItemInfoListFromSqlResult(std::move(res)));
 		});
 	});
@@ -275,12 +273,11 @@ void CHyDatabase::async_QueryUserOwnItemInfoBySteamID(const std::string &steamid
 			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl GROUP BY code "
 			") AS itemlst;"
 	);
-	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
-		if(ec)
+	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset) {
+		if (ec)
 			return fn(ec, {});
-		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
-			if(ec)
-				return fn(ec, {});
+		auto resultset_keep = std::make_shared<boost::mysql::tcp_resultset>(std::move(resultset));
+		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
 			return fn(ec, UserOwnItemInfoListFromSqlResult(std::move(res)));
 		});
 	});
@@ -331,8 +328,10 @@ void CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string &code, un
 	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
 	auto sql2 = std::make_shared<std::string>("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'");
 
-	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
-		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset){
+		if (ec)
+			return fn(false);
+		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset){
 			fn(!ec && resultset.affected_rows() > 0);
 		});
 	});
@@ -357,8 +356,10 @@ void CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std:
 	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
 	auto sql2 = std::make_shared<std::string>("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'");
 
-	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
-		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset resultset){
+	conn->async_query(*sql1, [fn, conn, sql1, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset){
+		if (ec)
+			return fn(false);
+		conn->async_query(*sql2, [fn, conn, sql2](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset){
 			fn(!ec && resultset.affected_rows() > 0);
 		});
 	});

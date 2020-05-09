@@ -6,18 +6,22 @@
 
 #include <mutex>
 
-void StartHeartBeat(std::weak_ptr<MySqlConnection> wconn)
+void MySqlConnectionPool::StartHeartBeat(std::weak_ptr<MySqlConnection> wconn)
 {
 	using namespace std::chrono_literals;
 	auto ioc = GlobalContextSingleton();
 	std::shared_ptr<boost::asio::system_timer> st = std::make_shared<boost::asio::system_timer>(*ioc);
 	st->expires_from_now(1min);
-	st->async_wait([ioc, st, wconn](const boost::system::error_code& ec) {
+	st->async_wait([ioc, st, wconn, this](const boost::system::error_code& ec) {
 		if (auto conn = wconn.lock())
 		{
-			conn->connection.async_query("SELECT 1=1",[conn](boost::system::error_code, boost::mysql::tcp_resultset){
-				StartHeartBeat(conn);
-			});
+			std::lock_guard l(this->m);
+			if (conn->accessor.lock() == nullptr)
+			{
+				auto sp = std::make_shared<std::shared_ptr<MySqlConnection>>(conn);
+				conn->accessor = sp;
+				conn->connection.query("SELECT 1=1;").fetch_all();
+			}
 		}
 	});
 }

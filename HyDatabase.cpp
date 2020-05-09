@@ -211,7 +211,21 @@ std::vector<HyItemInfo> CHyDatabase::AllItemInfoAvailable() noexcept(false)
 	));
 }
 
-std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false)
+void CHyDatabase::async_AllItemInfoAvailable(std::function<void(std::error_code, std::vector<HyItemInfo>)> fn)
+{
+	auto conn = pimpl->pool.acquire();
+	conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo;", [fn, conn](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
+		if(ec)
+			return fn(ec, {});
+		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res){
+			if(ec)
+				return fn(ec, {});
+			return fn(ec, InfoListFromSqlResult(std::move(res)));
+		});
+	});
+}
+
+std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t qqid)
 {
 	return UserOwnItemInfoListFromSqlResult(pimpl->pool.query_fetch(
 		"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
@@ -219,6 +233,26 @@ std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoByQQID(int64_t q
 			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl GROUP BY code "
 		") AS itemlst;"
 	));
+}
+
+void CHyDatabase::async_QueryUserOwnItemInfoByQQID(int64_t qqid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn)
+{
+	auto conn = pimpl->pool.acquire();
+	auto sql = std::make_shared<std::string>(
+			"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
+			"SELECT code, CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"WHERE idl2.idsrc = 'qq' AND idl2.auth = '" + std::to_string(qqid) + "' UNION (SELECT 'qq', '" + std::to_string(qqid) + "') ) AS idl GROUP BY code "
+			") AS itemlst;"
+		);
+	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
+		if(ec)
+			return fn(ec, {});
+		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
+			if(ec)
+				return fn(ec, {});
+			return fn(ec, UserOwnItemInfoListFromSqlResult(std::move(res)));
+		});
+	});
 }
 
 std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false)
@@ -229,6 +263,26 @@ std::vector<HyUserOwnItemInfo> CHyDatabase::QueryUserOwnItemInfoBySteamID(const 
 			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl GROUP BY code "
 			") AS itemlst;"
 	));
+}
+
+void CHyDatabase::async_QueryUserOwnItemInfoBySteamID(const std::string &steamid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn)
+{
+	auto conn = pimpl->pool.acquire();
+	auto sql = std::make_shared<std::string>(
+			"SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM iteminfo NATURAL JOIN ("
+			"SELECT code, CAST(SUM(amount) AS SIGNED INTEGER) AS amount FROM itemown NATURAL JOIN (SELECT idl1.idsrc, idl1.auth FROM idlink AS idl1 JOIN idlink AS idl2 ON idl1.uid = idl2.uid "
+			"WHERE idl2.idsrc = 'steam' AND idl2.auth = '" + steamid + "' UNION (SELECT 'steam', '" + steamid + "') ) AS idl GROUP BY code "
+			") AS itemlst;"
+	);
+	conn->async_query(*sql, [fn, conn, sql](boost::system::error_code ec, boost::mysql::tcp_resultset resultset) {
+		if(ec)
+			return fn(ec, {});
+		resultset.async_fetch_all([fn, conn](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
+			if(ec)
+				return fn(ec, {});
+			return fn(ec, UserOwnItemInfoListFromSqlResult(std::move(res)));
+		});
+	});
 }
 
 int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code) noexcept(false)

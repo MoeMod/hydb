@@ -21,5 +21,5 @@ add_library(hydb STATIC
         )
 target_include_directories(hydb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hydb PUBLIC xorstr)
-target_link_libraries(hydb PRIVATE Boost::boost)
+target_link_libraries(hydb PRIVATE Boost::boost Boost::date_time)
 target_link_libraries(hydb PRIVATE Boost_mysql)

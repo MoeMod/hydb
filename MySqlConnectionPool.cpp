@@ -1,6 +1,5 @@
 #include "MySqlConnectionPool.h"
 #include "DatabaseConfig.h"
-#include "cppconn/statement.h"
 #include "GlobalContext.h"
 #include <boost/asio.hpp>
 #include "MySqlConnection.h"

@@ -6,6 +6,7 @@
 #include <string>
 #include <future>
 #include <string_view>
+#include <numeric>
 #include <assert.h>
 
 struct CHyDatabase::impl_t

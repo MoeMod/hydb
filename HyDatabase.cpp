@@ -488,7 +488,7 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	std::transform(vecItems.begin(), vecItems.end(), give_futures.begin(), f2);
 	bool success_give = std::transform_reduce(give_futures.begin(), give_futures.end(), true, std::logical_and<bool>(), std::mem_fn(&std::future<bool>::get));
 
-	return { HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} };
+	return { success_give ? HyUserSignResultType::success : HyUserSignResultType::failure_unknown, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} };
 }
 
 void CHyDatabase::Hibernate()

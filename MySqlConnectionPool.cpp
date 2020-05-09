@@ -11,7 +11,7 @@ void MySqlConnectionPool::StartHeartBeat(std::weak_ptr<MySqlConnection> wconn)
 	using namespace std::chrono_literals;
 	auto ioc = GlobalContextSingleton();
 	std::shared_ptr<boost::asio::system_timer> st = std::make_shared<boost::asio::system_timer>(*ioc);
-	st->expires_from_now(1min);
+	st->expires_after(1min);
 	st->async_wait([ioc, st, wconn, this](const boost::system::error_code& ec) {
 		if (auto conn = wconn.lock())
 		{
@@ -44,8 +44,9 @@ std::shared_ptr<boost::mysql::tcp_connection> MySqlConnectionPool::acquire()
 		{
 			// 有可用连接，设置后返回。
 			auto sp = std::make_shared<std::shared_ptr<MySqlConnection>>(*iter);
-			(*iter)->accessor = ret;
-
+			auto conn = *iter;
+			conn->accessor = sp;
+			conn->wait_for_ready();
 			ret = std::shared_ptr<boost::mysql::tcp_connection>(sp, &(*sp)->connection);
 			//break;
 		}
@@ -54,8 +55,6 @@ std::shared_ptr<boost::mysql::tcp_connection> MySqlConnectionPool::acquire()
 		    auto ioc = GlobalContextSingleton();
 			auto conn = std::make_shared<MySqlConnection>(config, ioc);
 			conn->start();
-			conn->wait_for_ready();
-			StartHeartBeat(conn);
 			v.push_back(conn);
 			//continue;
 		}

@@ -71,6 +71,37 @@ public:
         }
 
         pro_connected.set_value();
+
+        start_ping(ec);
+    }
+
+    void start_ping(const boost::system::error_code& ec)
+    {
+        if (ec)
+            return fail(ec, "start_ping");
+        using namespace std::chrono_literals;
+        accessor.reset();
+        std::shared_ptr<boost::asio::system_timer> st = std::make_shared<boost::asio::system_timer>(*ioc);
+        st->expires_after(1min);
+        st->async_wait(std::bind(&MySqlConnection::on_ping, this->shared_from_this(), std::placeholders::_1));
+    }
+
+    void on_ping(const boost::system::error_code& ec)
+    {
+        if (ec)
+            return fail(ec, "on_ping");
+        pro_connected = {};
+        fut_connected = pro_connected.get_future();
+        if (accessor.lock() == nullptr)
+        {
+            // unique connection here
+            accessor = shared_from_this();
+            connection.async_query("SELECT 1=1;", std::bind(&MySqlConnection::start_ping, this->shared_from_this(), std::placeholders::_1));
+        }
+        else
+        {
+            start_ping(ec);
+        }
     }
 
     void fail(boost::system::error_code ec, const std::string &what) {
@@ -84,12 +115,6 @@ public:
     void wait_for_ready() const
     {
         fut_connected.get();
-    }
-
-    boost::mysql::tcp_resultset query(std::string_view sql)
-    {
-        wait_for_ready();
-        return connection.query(sql);
     }
 
 public:

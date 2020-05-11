@@ -6,7 +6,9 @@
 #include <optional>
 #include <vector>
 #include <future>
+#include <functional>
 #include <stdexcept>
+#include <system_error>
 
 struct HyUserAccountData
 {
@@ -49,7 +51,7 @@ enum class HyUserSignResultType
 {
 	success,
 	failure_already_signed,
-    failure
+	failure_unknown
 };
 
 struct HyUserSignResult
@@ -91,10 +93,18 @@ public:
 	bool BindQQToSteamID(int64_t new_qqid, int32_t gocode);
 	int32_t StartRegistrationWithSteamID(const std::string& steamid) noexcept(false);
 
-	// 查道具用
-	std::vector<HyItemInfo> AllItemInfoAvailable() noexcept(false);
-	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid) noexcept(false);
-	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid) noexcept(false);
+	// 查询服务器里面可用的所有道具类型
+	std::vector<HyItemInfo> AllItemInfoAvailable();
+	void async_AllItemInfoAvailable(std::function<void(std::error_code ec, std::vector<HyItemInfo>)> fn);
+
+	// 根据qqid查询名下所有道具（包括绑定的其他账号）
+	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid);
+	void async_QueryUserOwnItemInfoByQQID(int64_t qqid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn);
+
+	// 根据steamid查询名下所有道具（包括绑定的其他账号）
+	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid);
+	void async_QueryUserOwnItemInfoBySteamID(const std::string &steamid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn);
+
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);
 	int32_t GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false);
 

@@ -53,6 +53,27 @@ struct IntegerVisitor {
 	}
 };
 
+struct StringVisitor
+{
+	std::string operator()(std::string_view arg)
+	{
+		return std::string(arg);
+	}
+	template<class T>
+	auto operator()(T x) -> typename std::enable_if<std::is_integral<T>::value, std::string>::type
+	{
+		return std::to_string(x);
+	}
+	std::string operator()(std::nullptr_t)
+	{
+		return {};
+	}
+	std::string operator()(...)
+	{
+		throw std::bad_variant_access();
+	}
+};
+
 // qqid, name, steamid, xscode, access, tag
 static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::mysql::owning_row> &res)
 {
@@ -61,11 +82,11 @@ static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::m
 	const auto &line = res[0].values();
 	return HyUserAccountData{
 		std::visit(IntegerVisitor<int64_t>(), line[0]),
-		std::string(std::get<std::string_view>(line[1])),
-		std::string(std::get<std::string_view>(line[2])),
-		std::visit(IntegerVisitor<int32_t>(), line[2]),
-		std::string(std::get<std::string_view>(line[4])),
-		std::string(std::get<std::string_view>(line[5]))
+		std::visit(StringVisitor(), line[1]),
+		std::visit(StringVisitor(), line[2]),
+		std::visit(IntegerVisitor<int32_t>(), line[3]),
+		std::visit(StringVisitor(), line[4]),
+		std::visit(StringVisitor(), line[5])
 	};
 }
 

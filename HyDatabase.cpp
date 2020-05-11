@@ -8,11 +8,15 @@
 #include <string_view>
 #include <assert.h>
 
+#include "GlobalContext.h"
+#include <boost/asio.hpp>
+#include <boost/asio/spawn.hpp>
+
 struct CHyDatabase::impl_t
 {
 public:
+    std::shared_ptr<boost::asio::io_context> ioc = GlobalContextSingleton();
 	MySqlConnectionPool pool;
-	std::atomic<int> m_iCachedSignRank = 0;
 };
 
 CHyDatabase CHyDatabase::instance;
@@ -26,7 +30,7 @@ CHyDatabase::CHyDatabase() : pimpl(std::make_shared<impl_t>()) {}
 CHyDatabase::~CHyDatabase() = default;
 
 
-template<class IntegeralType>
+template<class IntegeralType = int>
 struct IntegerVisitor {
 	static_assert(std::is_integral<IntegeralType>::value);
 
@@ -51,6 +55,7 @@ struct IntegerVisitor {
 		throw std::bad_variant_access();
 	}
 };
+IntegerVisitor() -> IntegerVisitor<int>;
 
 // qqid, name, steamid, xscode, access, tag
 static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::mysql::owning_row> &res)
@@ -326,113 +331,98 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
 	if(!user.qqid)
 		throw InvalidUserAccountDataException();
 
-	int rewardmultiply = 1;
-	int signcount = 0;
+	auto ioc = pimpl->ioc;
+    auto conn = pimpl->pool.acquire();
+    auto pro = std::make_shared<std::promise<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>>>();
+	boost::asio::spawn(ioc->get_executor(), [ioc, conn, user, pro](boost::asio::yield_context yield){
+        int rewardmultiply = 1;
+        int signcount = 0;
 
-	// 判断是否重复签到
-	{
-		auto res = pimpl->pool.query_fetch("SELECT TO_DAYS(NOW()) - TO_DAYS(`signdate`) AS signdelta, `signcount` FROM qqevent WHERE `qqid` ='" + std::to_string(user.qqid) + "';");
-		if (!res.empty())
-		{
-			int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0]);
-			
-			if (signdelta == 0 )
+        // 判断是否重复签到
+        {
+            auto res = conn->async_query("SELECT TO_DAYS(NOW()) - TO_DAYS(`signdate`) AS signdelta, `signcount` FROM qqevent WHERE `qqid` ='" + std::to_string(user.qqid) + "';", yield).async_fetch_all(yield);
+            if (!res.empty())
+            {
+                int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0]);
+
+                if (signdelta == 0 )
+                {
+                    // 已经签到过
+                    return pro->set_value({ HyUserSignResultType::failure_already_signed , std::nullopt });
+                }
+                if (signdelta == 1)
+                    signcount = std::get<std::int32_t>(res[0].values()[1]);
+                conn->async_query("UPDATE qqevent SET `signdate`=NOW(), `signcount`='" + std::to_string(signcount + 1) + "' WHERE `qqid`='" + std::to_string(user.qqid) + "';", yield);
+            }
+            else
+            {
+                conn->async_query("INSERT INTO qqevent(qqid) VALUES('" + std::to_string(user.qqid) + "');", yield);
+            }
+        }
+
+        // 计算签到名次
+        boost::mysql::tcp_resultset res = conn->async_query("SELECT COUNT(*) FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());", yield);
+        int rank = std::visit(IntegerVisitor(), res.async_fetch_all(yield)[0].values()[0]);
+
+        if (rank == 1)
+            rewardmultiply *= 3;
+        else if (rank == 2)
+            rewardmultiply *= 5;
+        else if (rank == 3)
+            rewardmultiply *= 0;
+        else if (rank == 4)
+            rewardmultiply *= 7;
+        else if (rank == 9)
+            rewardmultiply *= 0;
+        else if (rank == 10)
+            rewardmultiply *= 2;
+
+        if (user.access.find('o') != std::string::npos)
+            rewardmultiply *= 3;
+
+        ++signcount;
+
+        // 填充签到奖励表
+        std::vector<std::pair<HyItemInfo, int32_t>> awards;
+        {
+            auto res = conn->async_query("SELECT `code`, `name`, `desc`, `quantifier`, `amount` FROM itemaward NATURAL JOIN iteminfo WHERE '" + std::to_string(signcount) + "' BETWEEN `minfrags` AND `maxfrags`;", yield).async_fetch_all(yield);
+
+            for(auto & l : res)
+            {
+                HyItemInfo item = HyItemInfoFromSqlLine(l.values());
+
+                int add_amount = std::visit(IntegerVisitor(), l.values()[4]);
+
+                awards.emplace_back(std::move(item), add_amount);
+            }
+
+            auto f = [&awards, &user]() -> HyUserSignGetItemInfo {
+                // 随机选择签到奖励
+                std::random_device rd;
+                std::uniform_int_distribution<std::size_t> rg(0, awards.size() - 1);
+
+                auto &reward = awards[rg(rd)];
+                auto &item = reward.first;
+                auto add_amount = reward.second;
+
+                // 查询已有数量
+                auto cur_amount = HyDatabase().GetItemAmountByQQID(user.qqid, item.code);
+                cur_amount += add_amount;
+                return HyUserSignGetItemInfo{ item, add_amount, cur_amount };
+            };
+            std::vector<HyUserSignGetItemInfo> vecItems(rewardmultiply);
+            std::generate(vecItems.begin(), vecItems.end(), f);
+
+            // 设置新奖励
+            for(auto &info : vecItems)
 			{
-				// 已经签到过
-				return { HyUserSignResultType::failure_already_signed , std::nullopt };
+				conn->async_query("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(user.qqid) + "', '" + info.item.code + "', '0');", yield);
+				bool result = conn->async_query("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(info.add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(user.qqid) + "' AND `code` = '" + info.item.code + "'", yield).affected_rows() > 0;
 			}
-
-			if (signdelta == 1)
-				signcount = std::get<std::int32_t>(res[0].values()[1]);
-
-            pimpl->pool.query_update("UPDATE qqevent SET `signdate`=NOW(), `signcount`='" + std::to_string(signcount + 1) + "' WHERE `qqid`='" + std::to_string(user.qqid) + "';");
-		}
-		else
-		{
-            pimpl->pool.query_update("INSERT INTO qqevent(qqid) VALUES('" + std::to_string(user.qqid) + "');");
-		}
-	}
-		
-
-	// 计算签到名次
-	int rank = 0; // pimpl->m_iCachedSignRank.load();
-	if(rank <= 10)
-	{
-		auto res = pimpl->pool.query_fetch("SELECT `qqid` FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());");
-		rank = res.size();
-		pimpl->m_iCachedSignRank.store(rank);
-	}
-	else
-	{
-		++pimpl->m_iCachedSignRank;
-	}
-
-	if (rank == 1)
-		rewardmultiply *= 3;
-	else if (rank == 2)
-		rewardmultiply *= 5;
-	else if (rank == 3)
-		rewardmultiply *= 0;
-	else if (rank == 4)
-		rewardmultiply *= 7;
-	else if (rank == 9)
-		rewardmultiply *= 0;
-	else if (rank == 10)
-		rewardmultiply *= 2;
-	
-	if (user.access.find('o') != std::string::npos)
-		rewardmultiply *= 3;
-
-	++signcount;
-
-	// 填充签到奖励表
-	std::vector<std::pair<HyItemInfo, int32_t>> awards;
-	{
-		auto res = pimpl->pool.query_fetch("SELECT "
-			"itemaward.`code` AS icode, "
-			"iteminfo.`name` AS iname, "
-			"iteminfo.`desc` AS idesc, "
-			"iteminfo.`quantifier` AS iquantifier, "
-			"CAST(itemaward.`amount` AS SIGNED INTEGER) AS iamount "
-			"FROM itemaward, iteminfo "
-			"WHERE itemaward.`code` = iteminfo.`code` AND '" + std::to_string(signcount) + "' BETWEEN `minfrags` AND `maxfrags`");
-
-		for(auto & l : res)
-		{
-			HyItemInfo item = HyItemInfoFromSqlLine(l.values());
-
-			int add_amount = std::visit(IntegerVisitor<int>(), l.values()[4]);
-
-			awards.emplace_back(std::move(item), add_amount);
-		}
-	}
-	
-	auto f = [&awards, &user, this]() -> HyUserSignGetItemInfo {
-		// 随机选择签到奖励
-		std::random_device rd;
-		std::uniform_int_distribution<std::size_t> rg(0, awards.size() - 1);
-
-		auto &reward = awards[rg(rd)];
-		auto &item = reward.first;
-		auto add_amount = reward.second;
-
-		// 查询已有数量
-		auto cur_amount = GetItemAmountByQQID(user.qqid, item.code);
-		cur_amount += add_amount;
-		return HyUserSignGetItemInfo{ item, add_amount, cur_amount };
-	};
-	std::vector<HyUserSignGetItemInfo> vecItems(rewardmultiply);
-	std::generate(vecItems.begin(), vecItems.end(), f);
-
-	// 设置新奖励
-	auto f2 = [&user, this](const HyUserSignGetItemInfo &info) {
-		return async_GiveItemByQQID(user.qqid, info.item.code, info.add_amount);
-	};
-	std::vector<std::future<bool>> give_futures(vecItems.size());
-	std::transform(vecItems.begin(), vecItems.end(), give_futures.begin(), f2);
-	bool success_give = std::transform_reduce(give_futures.begin(), give_futures.end(), true, std::logical_and<bool>(), std::mem_fn(&std::future<bool>::get));
-
-	return { HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} };
+            return pro->set_value({ HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} });
+        }
+	});
+    return pro->get_future().get();
 }
 
 void CHyDatabase::Hibernate()

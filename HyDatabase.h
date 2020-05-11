@@ -49,6 +49,7 @@ enum class HyUserSignResultType
 {
 	success,
 	failure_already_signed,
+    failure
 };
 
 struct HyUserSignResult

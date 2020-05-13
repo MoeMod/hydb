@@ -149,7 +149,7 @@ bool CHyDatabase::BindQQToCS16Name(int64_t new_qqid, int32_t xscode)
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = std::get<std::int32_t>(res2[0].values()[0]);
+		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0]);
 		break;
 	}
 	//用uid和steamid注册
@@ -178,7 +178,7 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = std::get<std::int32_t>(res2[0].values()[0]);
+		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0]);
 		break;
 	}
 	//用uid和steamid注册

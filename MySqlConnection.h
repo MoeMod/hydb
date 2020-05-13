@@ -80,7 +80,6 @@ public:
         if (ec)
             return fail(ec, "start_ping");
         using namespace std::chrono_literals;
-        accessor.reset();
         std::shared_ptr<boost::asio::system_timer> st = std::make_shared<boost::asio::system_timer>(*ioc);
         st->expires_after(1min);
         st->async_wait(std::bind(&MySqlConnection::on_ping, this->shared_from_this(), std::placeholders::_1));
@@ -96,7 +95,10 @@ public:
         {
             // unique connection here
             accessor = shared_from_this();
-            connection.async_query("SELECT 1=1;", std::bind(&MySqlConnection::start_ping, this->shared_from_this(), std::placeholders::_1));
+            connection.async_query("SELECT 1=1;", [sp = shared_from_this()](const boost::system::error_code &ec, boost::mysql::tcp_resultset &&res) {
+                sp->start_ping(ec);
+                sp->accessor.reset();
+            });
         }
         else
         {

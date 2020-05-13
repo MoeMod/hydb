@@ -13,6 +13,8 @@
 #include <boost/asio.hpp>
 #include <boost/asio/spawn.hpp>
 
+#include "VariantVisitor.h"
+
 struct CHyDatabase::impl_t
 {
 public:
@@ -29,55 +31,6 @@ CHyDatabase &HyDatabase()
 CHyDatabase::CHyDatabase() : pimpl(std::make_shared<impl_t>()) {}
 
 CHyDatabase::~CHyDatabase() = default;
-
-
-template<class IntegeralType = int>
-struct IntegerVisitor {
-	static_assert(std::is_integral<IntegeralType>::value);
-
-	template<class T> auto operator()(T arg) -> typename std::enable_if<std::is_integral<T>::value, IntegeralType>::type
-	{
-		return arg;
-	}
-	IntegeralType operator()(std::string_view arg)
-	{
-		std::stringstream ss;
-		ss << arg;
-		IntegeralType ret = {};
-		ss >> ret;
-		return ret;
-	}
-	IntegeralType operator()(std::nullptr_t)
-	{
-		return 0;
-	}
-	IntegeralType operator()(...)
-	{
-		throw std::bad_variant_access();
-	}
-};
-IntegerVisitor() -> IntegerVisitor<int>;
-
-struct StringVisitor
-{
-	std::string operator()(std::string_view arg)
-	{
-		return std::string(arg);
-	}
-	template<class T>
-	auto operator()(T x) -> typename std::enable_if<std::is_integral<T>::value, std::string>::type
-	{
-		return std::to_string(x);
-	}
-	std::string operator()(std::nullptr_t)
-	{
-		return {};
-	}
-	std::string operator()(...)
-	{
-		throw std::bad_variant_access();
-	}
-};
 
 // qqid, name, steamid, xscode, access, tag
 static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::mysql::owning_row> &res)
@@ -106,6 +59,33 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataByQQID(int64_t fromQQ)
 	));
 }
 
+void CHyDatabase::async_QueryUserAccountDataByQQID(int64_t fromQQ, std::function<void(std::optional<HyUserAccountData>)> fn)
+{
+	auto sql = std::make_shared<std::string>(
+		"SELECT qqid, name, steamid, xscode, access, tag FROM qqlogin "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS qqid, uid FROM idlink WHERE idsrc = 'qq') AS T1 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS name, uid FROM idlink WHERE idsrc = 'name') AS T2 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS steamid, uid FROM idlink WHERE idsrc = 'steam') AS T3 "
+		"WHERE `qqid` = '" + std::to_string(fromQQ) + "';"
+	);
+	auto conn = pimpl->pool.acquire();
+	conn->async_query(*sql, [sql, fn, conn](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset) {
+		if (ec)
+			return fn(std::nullopt);
+		auto resultset_keep = std::make_shared<boost::mysql::tcp_resultset>(std::move(resultset));
+		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res){
+			if (ec)
+				return fn(std::nullopt);
+			try {
+				return fn(UserAccountDataFromSqlResult(res));
+			}
+			catch(...) {
+				return fn(std::nullopt);
+			}
+		});
+	});
+}
+
 HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& steamid) noexcept(false)
 {
 	return UserAccountDataFromSqlResult(pimpl->pool.query_fetch(
@@ -115,6 +95,33 @@ HyUserAccountData CHyDatabase::QueryUserAccountDataBySteamID(const std::string& 
 		"NATURAL LEFT OUTER JOIN (SELECT auth AS steamid, uid FROM idlink WHERE idsrc = 'steam') AS T3 "
 		"WHERE `steamid` = '" + steamid + "';"
 	));
+}
+
+void CHyDatabase::async_QueryUserAccountDataBySteamID(const std::string &steamid, std::function<void(std::optional<HyUserAccountData>)> fn)
+{
+	auto sql = std::make_shared<std::string>(
+		"SELECT qqid, name, steamid, xscode, access, tag FROM qqlogin "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS qqid, uid FROM idlink WHERE idsrc = 'qq') AS T1 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS name, uid FROM idlink WHERE idsrc = 'name') AS T2 "
+		"NATURAL LEFT OUTER JOIN (SELECT auth AS steamid, uid FROM idlink WHERE idsrc = 'steam') AS T3 "
+		"WHERE `steamid` = '" + steamid + "';"
+		);
+	auto conn = pimpl->pool.acquire();
+	conn->async_query(*sql, [sql, fn, conn](boost::system::error_code ec, boost::mysql::tcp_resultset &&resultset) {
+		if (ec)
+			return fn(std::nullopt);
+		auto resultset_keep = std::make_shared<boost::mysql::tcp_resultset>(std::move(resultset));
+		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res){
+			if (ec)
+				return fn(std::nullopt);
+			try {
+				return fn(UserAccountDataFromSqlResult(res));
+			}
+			catch(...) {
+				return fn(std::nullopt);
+			}
+		});
+	});
 }
 
 bool CHyDatabase::UpdateXSCodeByQQID(int64_t qqid, int32_t xscode)
@@ -181,22 +188,26 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 	return res3 == 1;
 }
 
-int32_t CHyDatabase::StartRegistrationWithSteamID(const std::string& steamid) noexcept(false)
+void CHyDatabase::async_StartRegistrationWithSteamID(const std::string& steamid, std::function<void(int32_t gocode)> fn)
 {
-	static std::random_device rd;
-	std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
-	std::string gocode(8, '0');
-	while(steamid_hash.size() < gocode.size())
-		steamid_hash.push_back(std::uniform_int_distribution<int>('0', '9')(rd));
-	int iMaxTries = 10;
-	do {
-		if (--iMaxTries == 0)
-			throw std::runtime_error("try failed");
-        pimpl->pool.query_update("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';");
-		std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(rd()));
-	} while (pimpl->pool.query_update("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');") != 1);
+	auto ioc = pimpl->ioc;
+	auto conn = pimpl->pool.acquire();
+	boost::asio::spawn(ioc->get_executor(), [ioc, conn, steamid, fn](boost::asio::yield_context yield) {
 
-	return std::stoi(gocode);
+		static std::random_device rd;
+		std::string steamid_hash = std::to_string(std::hash<std::string>()(steamid));
+		std::string gocode(8, '0');
+		while(steamid_hash.size() < gocode.size())
+			steamid_hash.push_back(std::uniform_int_distribution<int>('0', '9')(rd));
+		int iMaxTries = 10;
+		do {
+			if (--iMaxTries == 0)
+				throw std::runtime_error("try failed");
+			conn->async_query("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';", yield);
+			std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(rd()));
+		} while (conn->async_query("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');", yield).affected_rows() != 1);
+		ioc->dispatch(std::bind(fn, std::stoi(gocode)));
+	});
 }
 
 // `code`, `name`, `desc`, `quantifier`
@@ -405,6 +416,11 @@ bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::st
 
 std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::DoUserDailySign(const HyUserAccountData &user)
 {
+	return async_DoUserDailySign(user).get();
+}
+
+std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CHyDatabase::async_DoUserDailySign(const HyUserAccountData &user)
+{
 	if(!user.qqid)
 		throw InvalidUserAccountDataException();
 
@@ -499,7 +515,7 @@ std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> CHyDatabase::Do
             return pro->set_value({ HyUserSignResultType::success, HyUserSignResult{ rank, signcount, rewardmultiply, std::move(vecItems)} });
         }
 	});
-    return pro->get_future().get();
+    return pro->get_future();
 }
 
 void CHyDatabase::Hibernate()

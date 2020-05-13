@@ -83,7 +83,10 @@ private:
 public:
 	// 登录用
 	HyUserAccountData QueryUserAccountDataByQQID(int64_t qqid) noexcept(false); // 可能抛出InvalidUserAccountDataException
+	void async_QueryUserAccountDataByQQID(int64_t qqid, std::function<void(std::optional<HyUserAccountData>)>);
+
 	HyUserAccountData QueryUserAccountDataBySteamID(const std::string &steamid) noexcept(false); // 可能抛出InvalidUserAccountDataException
+	void async_QueryUserAccountDataBySteamID(const std::string &steamid, std::function<void(std::optional<HyUserAccountData>)>);
 
 	// CS1.6支持
 	bool UpdateXSCodeByQQID(int64_t qqid, int32_t xscode);
@@ -91,7 +94,7 @@ public:
 
 	// CSGO注册用
 	bool BindQQToSteamID(int64_t new_qqid, int32_t gocode);
-	int32_t StartRegistrationWithSteamID(const std::string& steamid) noexcept(false);
+	void async_StartRegistrationWithSteamID(const std::string& steamid, std::function<void(int32_t gocode)>);
 
 	// 查询服务器里面可用的所有道具类型
 	std::vector<HyItemInfo> AllItemInfoAvailable();
@@ -122,6 +125,7 @@ public:
 
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);
+	std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> async_DoUserDailySign(const HyUserAccountData &user);
 
 	// 断开所有空闲连接
 	void Hibernate();

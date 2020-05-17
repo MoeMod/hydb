@@ -30,6 +30,15 @@ public:
     boost::mysql::tcp_connection connection;
     boost::asio::ip::tcp::endpoint endpoint;
 
+    enum class Status
+    {
+        invalid,
+        failed,
+        available,
+        in_use,
+        on_ping
+    };
+
     void start()
     {
         resolver.async_resolve(
@@ -65,12 +74,10 @@ public:
 
     void on_handshake(boost::system::error_code ec) {
         if (ec)
-        {
-            connection.close();
             return fail(ec, "handshake");
-        }
-
-        pro_connected.set_value();
+        
+        assert(status.load() == Status::invalid);
+        status.store(Status::available);
 
         start_ping(ec);
     }
@@ -81,23 +88,24 @@ public:
             return fail(ec, "start_ping");
         using namespace std::chrono_literals;
         std::shared_ptr<boost::asio::system_timer> st = std::make_shared<boost::asio::system_timer>(*ioc);
-        st->expires_after(1min);
-        st->async_wait(std::bind(&MySqlConnection::on_ping, this->shared_from_this(), std::placeholders::_1));
+        st->expires_after(20s);
+        st->async_wait([sp = shared_from_this(), st](const boost::system::error_code& ec) { sp->on_ping(ec); });
     }
 
     void on_ping(const boost::system::error_code& ec)
     {
         if (ec)
             return fail(ec, "on_ping");
-        pro_connected = {};
-        fut_connected = pro_connected.get_future();
-        if (accessor.lock() == nullptr)
+        if (auto desired = Status::available; status.compare_exchange_strong(desired, Status::on_ping))
         {
             // unique connection here
-            accessor = shared_from_this();
             connection.async_query("SELECT 1=1;", [sp = shared_from_this()](const boost::system::error_code &ec, boost::mysql::tcp_resultset &&res) {
-                sp->start_ping(ec);
-                sp->accessor.reset();
+                std::shared_ptr<boost::mysql::tcp_resultset> pres = std::make_shared<boost::mysql::tcp_resultset>(std::move(res));
+                pres->async_fetch_all([sp, pres](const boost::system::error_code& ec, std::vector<boost::mysql::owning_row> res) {
+                    assert(sp->status.load() == Status::on_ping);
+                    sp->status.store(Status::available);
+                    sp->start_ping(ec);
+                });
             });
         }
         else
@@ -107,20 +115,12 @@ public:
     }
 
     void fail(boost::system::error_code ec, const std::string &what) {
-        try {
-            pro_connected.set_exception(std::make_exception_ptr(std::system_error(ec, what + ": " + ec.message())));
-        } catch(std::future_error &){
-            // ignored
-        }
-    }
-
-    void wait_for_ready() const
-    {
-        fut_connected.get();
+        status.store(Status::failed);
+        last_error = std::make_exception_ptr(std::system_error(ec, what + ": " + ec.message()));
     }
 
 public:
-    std::promise<void> pro_connected;
-    std::shared_future<void> fut_connected = pro_connected.get_future();
+    std::exception_ptr last_error;
     std::weak_ptr<void> accessor;
+    std::atomic<Status> status = Status::invalid;
 };

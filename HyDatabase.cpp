@@ -202,11 +202,11 @@ void CHyDatabase::async_StartRegistrationWithSteamID(const std::string& steamid,
 		int iMaxTries = 10;
 		do {
 			if (--iMaxTries == 0)
-				throw std::runtime_error("try failed");
+				ioc->dispatch(std::bind(fn, 0));
 			conn->async_query("DELETE FROM csgoreg WHERE `steamid` = '" + steamid + "';", yield);
 			std::sample(steamid_hash.begin(), steamid_hash.end(), gocode.begin(), gocode.size(), std::mt19937(rd()));
 		} while (conn->async_query("INSERT IGNORE INTO csgoreg(steamid, gocode) VALUES('" + steamid + "', '" + gocode+ "');", yield).affected_rows() != 1);
-		ioc->dispatch(std::bind(fn, std::stoi(gocode)));
+		return ioc->dispatch(std::bind(fn, std::stoi(gocode)));
 	});
 }
 

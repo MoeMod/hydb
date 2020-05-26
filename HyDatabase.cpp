@@ -411,6 +411,7 @@ bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::st
 	if(iHasAmount < sub_amount)
 		return false;
     pimpl->pool.query_update("DELETE FROM itemown WHERE (itemown.idsrc, itemown.auth) IN (SELECT idl0.idsrc AS idsrc, idl0.auth AS auth FROM idlink AS idl0 JOIN idlink AS idl1 ON idl0.uid = idl1.uid WHERE idl1.idsrc = 'steam' AND idl1.auth = '" + steamid + "') AND `code` = '" + code + "';");
+	iHasAmount -= sub_amount;
 	return GiveItemBySteamID(steamid, code, static_cast<unsigned>(iHasAmount));
 }
 
@@ -516,6 +517,11 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
         }
 	});
     return pro->get_future();
+}
+
+void CHyDatabase::Start()
+{
+	pimpl->pool.reserve(3);
 }
 
 void CHyDatabase::Hibernate()

@@ -20,6 +20,7 @@ public:
 	// ensures not nullptr
 	std::shared_ptr<boost::mysql::tcp_connection> acquire();
 	void clear();
+	void reserve(size_t n);
 
     std::vector<boost::mysql::owning_row> query_fetch(std::string_view sql);
     std::uint64_t query_update(std::string_view sql);

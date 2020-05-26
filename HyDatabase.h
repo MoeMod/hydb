@@ -127,6 +127,9 @@ public:
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);
 	std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> async_DoUserDailySign(const HyUserAccountData &user);
 
+	// 自动连接
+	void Start();
+
 	// 断开所有空闲连接
 	void Hibernate();
 

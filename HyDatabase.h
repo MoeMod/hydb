@@ -108,20 +108,24 @@ public:
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid);
 	void async_QueryUserOwnItemInfoBySteamID(const std::string &steamid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn);
 
+	// 根据qqid查询名下某道具数量
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);
+	void async_GetItemAmountByQQID(int64_t qqid, const std::string& code, std::function<void(int32_t)> fn);
+
+	// 根据steamid查询名下某道具数量
 	int32_t GetItemAmountBySteamID(const std::string &steamid, const std::string & code) noexcept(false);
+	void async_GetItemAmountBySteamID(const std::string& steamid, const std::string& code, std::function<void(int32_t)> fn);
 
 	// 给玩家qqid赠送道具
 	bool GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount);
 	void async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
-	std::future<bool> async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount);
 
 	// 给玩家steamid赠送道具
 	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount);
 	void async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
-	std::future<bool> async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount);
 
-	bool ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount) noexcept(false);
+	bool ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount);
+	void async_ConsumeItemBySteamID(const std::string& steamid, const std::string& code, unsigned sub_amount, std::function<void(bool success)> fn);
 
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);

@@ -39,12 +39,12 @@ static HyUserAccountData UserAccountDataFromSqlResult(const std::vector<boost::m
 		throw InvalidUserAccountDataException();
 	const auto &line = res[0].values();
 	return HyUserAccountData{
-		std::visit(IntegerVisitor<int64_t>(), line[0]),
-		std::visit(StringVisitor(), line[1]),
-		std::visit(StringVisitor(), line[2]),
-		std::visit(IntegerVisitor<int32_t>(), line[3]),
-		std::visit(StringVisitor(), line[4]),
-		std::visit(StringVisitor(), line[5])
+		std::visit(IntegerVisitor<int64_t>(), line[0].to_variant()),
+		std::visit(StringVisitor(), line[1].to_variant()),
+		std::visit(StringVisitor(), line[2].to_variant()),
+		std::visit(IntegerVisitor<int32_t>(), line[3].to_variant()),
+		std::visit(StringVisitor(), line[4].to_variant()),
+		std::visit(StringVisitor(), line[5].to_variant())
 	};
 }
 
@@ -136,7 +136,7 @@ bool CHyDatabase::BindQQToCS16Name(int64_t new_qqid, int32_t xscode)
 	if (res1.empty())
 		return false;
 	
-	const std::string name = std::string(std::get<std::string_view>(res1[0].values()[0]));
+	const std::string name = std::visit(StringVisitor(), res1[0].values()[0].to_variant());
 	int uid = 0;
 	while (1)
 	{
@@ -149,7 +149,7 @@ bool CHyDatabase::BindQQToCS16Name(int64_t new_qqid, int32_t xscode)
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0]);
+		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0].to_variant());
 		break;
 	}
 	//用uid和steamid注册
@@ -165,7 +165,7 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 	if (res1.empty())
 		return false; // 没有记录的注册id
 
-	const std::string steamid = std::string(std::get<std::string_view>(res1[0].values()[0]));
+	const std::string steamid = std::visit(StringVisitor(), res1[0].values()[0].to_variant());
 	int uid = 0; 
 	while (1)
 	{
@@ -178,7 +178,7 @@ bool CHyDatabase::BindQQToSteamID(int64_t new_qqid, int32_t gocode)
 			continue;
 		}
 		//已经注册过，得到原先的uid 
-		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0]);
+		uid = std::visit(IntegerVisitor<int>(), res2[0].values()[0].to_variant());
 		break;
 	}
 	//用uid和steamid注册
@@ -214,10 +214,10 @@ void CHyDatabase::async_StartRegistrationWithSteamID(const std::string& steamid,
 static HyItemInfo HyItemInfoFromSqlLine(const std::vector<boost::mysql::value> &line)
 {
 	return HyItemInfo{
-			std::string(std::get<std::string_view>(line[0])),
-			std::string(std::get<std::string_view>(line[1])),
-			std::string(std::get<std::string_view>(line[2])),
-			std::string(std::get<std::string_view>(line[3]))
+			std::visit(StringVisitor(), line[0].to_variant()),
+			std::visit(StringVisitor(), line[1].to_variant()),
+			std::visit(StringVisitor(), line[2].to_variant()),
+			std::visit(StringVisitor(), line[3].to_variant())
 	};
 }
 
@@ -237,7 +237,7 @@ static std::vector<HyUserOwnItemInfo> UserOwnItemInfoListFromSqlResult(const std
     std::vector<HyUserOwnItemInfo> result;
 	for(auto &l : res)
 	{
-		result.push_back({ HyItemInfoFromSqlLine(l.values()), std::visit(IntegerVisitor<int>(), l.values()[4]) });
+		result.push_back({ HyItemInfoFromSqlLine(l.values()), std::visit(IntegerVisitor<int>(), l.values()[4].to_variant()) });
 	}
     return result;
 }
@@ -328,7 +328,7 @@ int32_t CHyDatabase::GetItemAmountByQQID(int64_t qqid, const std::string &code) 
 	);
 
 	if (!res.empty()){
-		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]);
+		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0].to_variant());
 	}
 	return 0;
 }
@@ -347,7 +347,7 @@ void CHyDatabase::async_GetItemAmountByQQID(int64_t qqid, const std::string& cod
 		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
 			if (ec)
 				return fn(0);
-			return fn(!res.empty() ? std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]) : 0);
+			return fn(!res.empty() ? std::visit(IntegerVisitor<int32_t>(), res[0].values()[0].to_variant()) : 0);
 			});
 		});
 }
@@ -360,7 +360,7 @@ int32_t CHyDatabase::GetItemAmountBySteamID(const std::string &steamid, const st
 	);
 
 	if (!res.empty()){
-		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]);
+		return std::visit(IntegerVisitor<int32_t>(), res[0].values()[0].to_variant());
 	}
 	return 0;
 }
@@ -379,7 +379,7 @@ void CHyDatabase::async_GetItemAmountBySteamID(const std::string& steamid, const
 		resultset_keep->async_fetch_all([fn, conn, resultset_keep](boost::system::error_code ec, std::vector<boost::mysql::owning_row> res) {
 			if (ec)
 				return fn(0);
-			return fn(!res.empty() ? std::visit(IntegerVisitor<int32_t>(), res[0].values()[0]) : 0);
+			return fn(!res.empty() ? std::visit(IntegerVisitor<int32_t>(), res[0].values()[0].to_variant()) : 0);
 		});
 	});
 }
@@ -483,7 +483,7 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
             auto res = conn->async_query("SELECT TO_DAYS(NOW()) - TO_DAYS(`signdate`) AS signdelta, `signcount` FROM qqevent WHERE `qqid` ='" + std::to_string(user.qqid) + "';", yield).async_fetch_all(yield);
             if (!res.empty())
             {
-                int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0]);
+                int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0].to_variant());
 
                 if (signdelta == 0 )
                 {
@@ -491,7 +491,7 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
                     return pro->set_value({ HyUserSignResultType::failure_already_signed , std::nullopt });
                 }
                 if (signdelta == 1)
-                    signcount = std::get<std::int32_t>(res[0].values()[1]);
+                    signcount = std::visit(IntegerVisitor<int>(), res[0].values()[1].to_variant());
                 conn->async_query("UPDATE qqevent SET `signdate`=NOW(), `signcount`='" + std::to_string(signcount + 1) + "' WHERE `qqid`='" + std::to_string(user.qqid) + "';", yield);
             }
             else
@@ -502,7 +502,7 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
 
         // 计算签到名次
         boost::mysql::tcp_resultset res = conn->async_query("SELECT COUNT(*) FROM qqevent WHERE TO_DAYS(`signdate`) = TO_DAYS(NOW());", yield);
-        int rank = std::visit(IntegerVisitor(), res.async_fetch_all(yield)[0].values()[0]);
+        int rank = std::visit(IntegerVisitor(), res.async_fetch_all(yield)[0].values()[0].to_variant());
 
         if (rank == 1)
             rewardmultiply *= 3;
@@ -531,7 +531,7 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
             {
                 HyItemInfo item = HyItemInfoFromSqlLine(l.values());
 
-                int add_amount = std::visit(IntegerVisitor(), l.values()[4]);
+                int add_amount = std::visit(IntegerVisitor(), l.values()[4].to_variant());
 
                 awards.emplace_back(std::move(item), add_amount);
             }

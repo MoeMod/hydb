@@ -573,13 +573,13 @@ void CHyDatabase::async_QueryShopEntry(std::function<void(std::vector<HyShopEntr
 		
 		auto code_to_item = [&yield, &conn](const std::string &code) -> HyItemInfo {
 			return HyItemInfoFromSqlLine(
-				conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo WHERE `code` = '" + code + "'", yield)
+				conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo WHERE `code` = '" + code + "';", yield)
 				.async_fetch_all(yield).front().values()
 			);
 		};
 
 		std::vector<boost::mysql::owning_row> shopres = conn->async_query(
-			"SELECT `shopid`, `target_code`, `target_amount`, `exchange_code`, `exchange_amout` FROM itemshop;"
+			"SELECT `shopid`, `target_code`, `target_amount`, `exchange_code`, `exchange_amount` FROM itemshop;"
 			, yield).async_fetch_all(yield);
 
 		auto parse_entry = [code_to_item](const boost::mysql::owning_row &l) {

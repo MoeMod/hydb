@@ -62,6 +62,15 @@ struct HyUserSignResult
 	std::vector<HyUserSignGetItemInfo> vecItems;
 };
 
+struct HyShopEntry
+{
+	int32_t shopid;
+	HyItemInfo target_item;
+	int target_amount;
+	HyItemInfo exchange_item;
+	int exchange_amount;
+};
+
 class InvalidUserAccountDataException : std::invalid_argument {
 public:
 	InvalidUserAccountDataException() : std::invalid_argument("InvalidUserAccountDataException : 此账号未注册。") {}
@@ -117,19 +126,22 @@ public:
 	void async_GetItemAmountBySteamID(const std::string& steamid, const std::string& code, std::function<void(int32_t)> fn);
 
 	// 给玩家qqid赠送道具
-	bool GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount);
-	void async_GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
+	bool GiveItemByQQID(int64_t qqid, const std::string & code, int add_amount);
+	void async_GiveItemByQQID(int64_t qqid, const std::string & code, int add_amount, std::function<void(bool success)> fn);
 
 	// 给玩家steamid赠送道具
-	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount);
-	void async_GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount, std::function<void(bool success)> fn);
+	bool GiveItemBySteamID(const std::string &steamid, const std::string & code, int add_amount);
+	void async_GiveItemBySteamID(const std::string &steamid, const std::string & code, int add_amount, std::function<void(bool success)> fn);
 
-	bool ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount);
-	void async_ConsumeItemBySteamID(const std::string& steamid, const std::string& code, unsigned sub_amount, std::function<void(bool success)> fn);
+	bool ConsumeItemBySteamID(const std::string &steamid, const std::string & code, int sub_amount);
+	void async_ConsumeItemBySteamID(const std::string& steamid, const std::string& code, int sub_amount, std::function<void(bool success)> fn);
 
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);
 	std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> async_DoUserDailySign(const HyUserAccountData &user);
+
+	// 道具商店
+	void async_QueryShopEntry(std::function<void(std::vector<HyShopEntry> se)>);
 
 	// 自动连接
 	void Start();

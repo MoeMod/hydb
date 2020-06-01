@@ -384,13 +384,13 @@ void CHyDatabase::async_GetItemAmountBySteamID(const std::string& steamid, const
 	});
 }
 
-bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string & code, unsigned add_amount)
+bool CHyDatabase::GiveItemByQQID(int64_t qqid, const std::string & code, int add_amount)
 {
 	pimpl->pool.query_update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0');");
 	return pimpl->pool.query_update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'qq' AND `auth` ='" + std::to_string(qqid) + "' AND `code` = '" + code + "'") > 0;
 }
 
-void CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string &code, unsigned add_amount, std::function<void(bool success)> fn)
+void CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string &code, int add_amount, std::function<void(bool success)> fn)
 {
 	auto conn = pimpl->pool.acquire();
 	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('qq', '" + std::to_string(qqid) + "', '" + code + "', '0'); ");
@@ -405,13 +405,13 @@ void CHyDatabase::async_GiveItemByQQID(int64_t qqid, const std::string &code, un
 	});
 }
 
-bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, unsigned add_amount)
+bool CHyDatabase::GiveItemBySteamID(const std::string &steamid, const std::string & code, int add_amount)
 {
     pimpl->pool.query_update("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
 	return pimpl->pool.query_update("UPDATE itemown SET `amount`=`amount`+'" + std::to_string(add_amount) + "' WHERE `idsrc` = 'steam' AND `auth` ='" + steamid + "' AND `code` = '" + code + "'") > 0;
 }
 
-void CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std::string &code, unsigned add_amount, std::function<void(bool success)> fn)
+void CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std::string &code, int add_amount, std::function<void(bool success)> fn)
 {
 	auto conn = pimpl->pool.acquire();
 	auto sql1 = std::make_shared<std::string>("INSERT IGNORE INTO itemown(idsrc, auth, code, amount) VALUES('steam', '" + steamid + "', '" + code + "', '0'); ");
@@ -426,7 +426,7 @@ void CHyDatabase::async_GiveItemBySteamID(const std::string &steamid, const std:
 	});
 }
 
-bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::string & code, unsigned sub_amount)
+bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::string & code, int sub_amount)
 {
 	if(pimpl->pool.query_update("UPDATE itemown SET `amount` = `amount` - '" + std::to_string(sub_amount) + "' WHERE `idsrc` = 'steam' AND `auth` = '" + steamid + "' AND `code` = '" + code + "' AND `amount` > '" + std::to_string(sub_amount) + "'; ") == 1)
 		return true;
@@ -439,7 +439,7 @@ bool CHyDatabase::ConsumeItemBySteamID(const std::string &steamid, const std::st
 	return GiveItemBySteamID(steamid, code, static_cast<unsigned>(iHasAmount));
 }
 
-void CHyDatabase::async_ConsumeItemBySteamID(const std::string& steamid, const std::string& code, unsigned sub_amount, std::function<void(bool success)> fn)
+void CHyDatabase::async_ConsumeItemBySteamID(const std::string& steamid, const std::string& code, int sub_amount, std::function<void(bool success)> fn)
 {
 	auto ioc = pimpl->ioc;
 	auto conn = pimpl->pool.acquire();
@@ -563,6 +563,40 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
         }
 	});
     return pro->get_future();
+}
+
+void CHyDatabase::async_QueryShopEntry(std::function<void(std::vector<HyShopEntry> se)> fn)
+{
+	auto ioc = pimpl->ioc;
+	auto conn = pimpl->pool.acquire();
+	boost::asio::spawn(ioc->get_executor(), [ioc, conn, fn](boost::asio::yield_context yield) {
+		
+		auto code_to_item = [&yield, &conn](const std::string &code) -> HyItemInfo {
+			return HyItemInfoFromSqlLine(
+				conn->async_query("SELECT `code`, `name`, `desc`, `quantifier` FROM iteminfo WHERE `code` = '" + code + "'", yield)
+				.async_fetch_all(yield).front().values()
+			);
+		};
+
+		std::vector<boost::mysql::owning_row> shopres = conn->async_query(
+			"SELECT `shopid`, `target_code`, `target_amount`, `exchange_code`, `exchange_amout` FROM itemshop;"
+			, yield).async_fetch_all(yield);
+
+		auto parse_entry = [code_to_item](const boost::mysql::owning_row &l) {
+			return HyShopEntry{
+				std::visit(IntegerVisitor(), l.values()[0].to_variant()), 
+				code_to_item(std::visit(StringVisitor(), l.values()[1].to_variant())),
+				std::visit(IntegerVisitor(), l.values()[2].to_variant()),
+				code_to_item(std::visit(StringVisitor(), l.values()[3].to_variant())),
+				std::visit(IntegerVisitor(), l.values()[4].to_variant())
+			};
+		};
+
+		std::vector<HyShopEntry> result;
+		std::transform(shopres.begin(), shopres.end(), std::back_inserter(result), parse_entry);
+		
+		return fn(std::move(result));
+	});
 }
 
 void CHyDatabase::Start()

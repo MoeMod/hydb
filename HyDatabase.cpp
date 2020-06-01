@@ -485,7 +485,7 @@ std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> CH
             {
                 int signdelta = std::visit(IntegerVisitor<int>(), res[0].values()[0].to_variant());
 
-                if (signdelta == 0 )
+                if (!res[0].values()[0].is_null() && signdelta == 0 )
                 {
                     // 已经签到过
                     return pro->set_value({ HyUserSignResultType::failure_already_signed , std::nullopt });

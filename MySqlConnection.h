@@ -1,13 +1,13 @@
 #pragma once
 
-#include <boost/mysql/mysql.hpp>
+#include <boost/mysql.hpp>
 
 class MySqlConnection : public std::enable_shared_from_this<MySqlConnection>
 {
 public:
     MySqlConnection(DatabaseConfig config, std::shared_ptr<boost::asio::io_context> io_context) :
         dbc(std::move(config)),
-        conn_params(dbc.user, dbc.pass, dbc.schema, boost::mysql::collation::utf8_general_ci, boost::mysql::ssl_options(boost::mysql::ssl_mode::disable)),
+        conn_params(dbc.user, dbc.pass, dbc.schema, boost::mysql::collation::utf8_general_ci, boost::mysql::ssl_mode::disable),
         ioc(std::move(io_context)),
         resolver(*ioc),
         connection(*ioc)
@@ -101,7 +101,7 @@ public:
             // unique connection here
             connection.async_query("SELECT 1=1;", [sp = shared_from_this()](const boost::system::error_code &ec, boost::mysql::tcp_resultset &&res) {
                 std::shared_ptr<boost::mysql::tcp_resultset> pres = std::make_shared<boost::mysql::tcp_resultset>(std::move(res));
-                pres->async_fetch_all([sp, pres](const boost::system::error_code& ec, std::vector<boost::mysql::owning_row> res) {
+                pres->async_read_all([sp, pres](const boost::system::error_code& ec, std::vector<boost::mysql::row> res) {
                     assert(sp->status.load() == Status::on_ping);
                     sp->status.store(Status::available);
                     sp->start_ping(ec);
@@ -116,11 +116,11 @@ public:
 
     void fail(boost::system::error_code ec, const std::string &what) {
         status.store(Status::failed);
-        last_error = std::make_exception_ptr(std::system_error(ec, what + ": " + ec.message()));
+        last_error = ec;
     }
 
 public:
-    std::exception_ptr last_error;
+    boost::system::error_code last_error;
     std::weak_ptr<void> accessor;
     std::atomic<Status> status = Status::invalid;
 };

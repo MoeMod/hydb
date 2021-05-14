@@ -75,15 +75,3 @@ void MySqlConnectionPool::clear()
 	std::lock_guard l(m); // 先加锁
 	v.clear();
 }
-
-std::vector<boost::mysql::owning_row> MySqlConnectionPool::query_fetch(std::string_view sql)
-{
-    auto conn = acquire();
-    return conn->query(sql).fetch_all();
-}
-
-std::uint64_t MySqlConnectionPool::query_update(std::string_view sql)
-{
-    auto conn = acquire();
-	return conn->query(sql).affected_rows();
-}

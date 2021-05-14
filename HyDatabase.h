@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <system_error>
 
+#include <boost/asio/awaitable.hpp>
+
 struct HyUserAccountData
 {
 	int64_t qqid = 0;
@@ -92,10 +94,10 @@ private:
 public:
 	// 登录用
 	HyUserAccountData QueryUserAccountDataByQQID(int64_t qqid) noexcept(false); // 可能抛出InvalidUserAccountDataException
-	void async_QueryUserAccountDataByQQID(int64_t qqid, std::function<void(std::optional<HyUserAccountData>)>);
+    boost::asio::awaitable<HyUserAccountData> async_QueryUserAccountDataByQQID(int64_t qqid);
 
 	HyUserAccountData QueryUserAccountDataBySteamID(const std::string &steamid) noexcept(false); // 可能抛出InvalidUserAccountDataException
-	void async_QueryUserAccountDataBySteamID(const std::string &steamid, std::function<void(std::optional<HyUserAccountData>)>);
+    boost::asio::awaitable<HyUserAccountData> async_QueryUserAccountDataBySteamID(const std::string &steamid);
 
 	// CS1.6支持
 	bool UpdateXSCodeByQQID(int64_t qqid, int32_t xscode);
@@ -103,19 +105,19 @@ public:
 
 	// CSGO注册用
 	bool BindQQToSteamID(int64_t new_qqid, int32_t gocode);
-	void async_StartRegistrationWithSteamID(const std::string& steamid, std::function<void(int32_t gocode)>);
+    boost::asio::awaitable<int32_t> async_StartRegistrationWithSteamID(const std::string& steamid); // 返回gocode
 
 	// 查询服务器里面可用的所有道具类型
 	std::vector<HyItemInfo> AllItemInfoAvailable();
-	void async_AllItemInfoAvailable(std::function<void(std::error_code ec, std::vector<HyItemInfo>)> fn);
+	boost::asio::awaitable<std::vector<HyItemInfo>> async_AllItemInfoAvailable();
 
 	// 根据qqid查询名下所有道具（包括绑定的其他账号）
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoByQQID(int64_t qqid);
-	void async_QueryUserOwnItemInfoByQQID(int64_t qqid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn);
+    boost::asio::awaitable<std::vector<HyUserOwnItemInfo>> async_QueryUserOwnItemInfoByQQID(int64_t qqid);
 
 	// 根据steamid查询名下所有道具（包括绑定的其他账号）
 	std::vector<HyUserOwnItemInfo> QueryUserOwnItemInfoBySteamID(const std::string &steamid);
-	void async_QueryUserOwnItemInfoBySteamID(const std::string &steamid, std::function<void(std::error_code ec, std::vector<HyUserOwnItemInfo>)> fn);
+    boost::asio::awaitable<std::vector<HyUserOwnItemInfo>>  async_QueryUserOwnItemInfoBySteamID(const std::string &steamid);
 
 	// 根据qqid查询名下某道具数量
 	int32_t GetItemAmountByQQID(int64_t qqid, const std::string & code) noexcept(false);
@@ -138,10 +140,10 @@ public:
 
 	// 签到用（确保QQID存在）
 	std::pair<HyUserSignResultType, std::optional<HyUserSignResult>> DoUserDailySign(const HyUserAccountData &user);
-	std::future<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> async_DoUserDailySign(const HyUserAccountData &user);
+    boost::asio::awaitable<std::pair<HyUserSignResultType, std::optional<HyUserSignResult>>> async_DoUserDailySign(const HyUserAccountData &user);
 
 	// 道具商店
-	void async_QueryShopEntry(std::function<void(std::vector<HyShopEntry> se)>);
+    boost::asio::awaitable<std::vector<HyShopEntry>> async_QueryShopEntry();
 
 	// 自动连接
 	void Start();
